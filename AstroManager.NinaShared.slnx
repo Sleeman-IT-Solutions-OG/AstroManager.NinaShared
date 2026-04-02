@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AstroManager.Contracts/AstroManager.Contracts.csproj" />
+  <Project Path="AstroManager.PluginShared/AstroManager.PluginShared.csproj" />
+</Solution>
