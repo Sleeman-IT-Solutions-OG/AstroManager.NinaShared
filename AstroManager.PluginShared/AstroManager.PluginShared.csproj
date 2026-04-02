@@ -10,6 +10,7 @@
     <Authors>AstroManager</Authors>
     <Company>AstroManager</Company>
     <Description>Shared public services used by the AstroManager N.I.N.A. plugin.</Description>
+    <RepositoryUrl>https://github.com/Sleeman-IT-Solutions-OG/AstroManager.NinaShared</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>nina;astrophotography;astromanager;shared</PackageTags>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
