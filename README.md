@@ -11,6 +11,8 @@ Public shared packages for the AstroManager N.I.N.A. plugin.
 
 This repository is the public shared-code surface used by the AstroManager N.I.N.A. plugin.
 It is intended to be published as NuGet packages via GitHub Packages.
+It is not intended to be a standalone end-user product.
+If you are looking for the actual plugin, use the `AstroManager.NinaPlugin` repository and its releases.
 
 ## Publish Flow
 
