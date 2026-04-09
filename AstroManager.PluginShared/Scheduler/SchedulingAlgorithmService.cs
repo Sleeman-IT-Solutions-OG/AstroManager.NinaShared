@@ -443,6 +443,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     MoonDistance = s.MoonDistance ?? 0,
                     MoonIllumination = (s.MoonIllumination ?? 0) * 100, // Convert 0-1 to percentage
                     RequiredMoonDistance = s.RequiredMoonDistance,
+                    PriorityScore = s.PriorityScore ?? s.ScheduledPriority,
+                    ScoreBreakdown = CloneScoreBreakdown(s.ScoreBreakdown),
+                    SelectionReason = s.SelectionReason ?? string.Empty,
                     AltitudeData = altitudeData,
                     FullNightAltitudeData = fullNightAltitudeData,
                     AverageAltitude = altitudeData?.Any() == true ? altitudeData.Average(a => a.Altitude) : 0,
@@ -697,6 +700,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 analysisWindowStart, nightEnd, moonPosition, includeAltitudeData,
                 altitudeDataIntervalMinutes, hasAnyScheduledSessions,
                 BuildNoScheduleDiagnosticsForTarget(preview.UnscheduledSlots, target.Name),
+                preview.Sessions,
                 cancellationToken);
 
             if (skipped != null)
@@ -718,6 +722,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         int altitudeIntervalMinutes,
         bool hasAnyScheduledSessions,
         string? noScheduleDiagnostics,
+        List<SchedulerPreviewSessionDto>? scheduledSessions,
         CancellationToken cancellationToken)
     {
         // Get target-specific effective min altitude (override → template → config)
@@ -1006,7 +1011,93 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     : $"No targets were scheduled in this preview window with the current constraints. {(string.IsNullOrWhiteSpace(noScheduleDiagnostics) ? string.Empty : $"Likely blockers: {noScheduleDiagnostics}.")}")
                 : "");
 
+        var diagnosticState = CreateDiagnosticTargetState(target, observableMinutes, maxAltitude, moonDistanceAtTransit);
+        var diagnosticTime = maxAltitudeTime ?? observableStart ?? nightStart;
+        var diagnosticScore = CalculateTargetScore(diagnosticState, configuration, diagnosticTime);
+        skipped.PriorityScore = diagnosticScore.TotalScore;
+        skipped.ScoreBreakdown = CloneScoreBreakdown(diagnosticScore.Breakdown);
+
+        if (scheduledSessions?.Any() == true && observableStart.HasValue && observableEnd.HasValue)
+        {
+            var winningSession = scheduledSessions
+                .Where(s => s.StartTimeUtc < observableEnd.Value && s.EndTimeUtc > observableStart.Value)
+                .OrderByDescending(s => s.PriorityScore)
+                .FirstOrDefault();
+
+            if (winningSession != null)
+            {
+                skipped.WinningTargetName = winningSession.TargetName + (winningSession.PanelNumber.HasValue ? $" P{winningSession.PanelNumber}" : string.Empty);
+                skipped.WinningTargetScore = winningSession.PriorityScore;
+
+                skipped.DetailedExplanation +=
+                    $" Best overlapping scheduled target: {skipped.WinningTargetName} " +
+                    $"({winningSession.StartTimeLocal:HH:mm}-{winningSession.EndTimeLocal:HH:mm}) " +
+                    $"with score {winningSession.PriorityScore:F1} versus {skipped.PriorityScore:F1}.";
+            }
+        }
+
         return skipped;
+    }
+
+    private static TargetSchedulingState CreateDiagnosticTargetState(
+        ScheduledTargetDto target,
+        double observableMinutes,
+        double altitude,
+        double moonDistance)
+    {
+        return new TargetSchedulingState
+        {
+            Target = target,
+            CurrentPriority = target.Priority,
+            ObservableMinutesTonight = Math.Max(0, observableMinutes),
+            FilterProgress = BuildDiagnosticFilterProgress(target),
+            CurrentPeriod = new ObservablePeriod
+            {
+                Altitude = Math.Max(0, altitude),
+                MoonDistance = Math.Max(0, moonDistance)
+            }
+        };
+    }
+
+    private static Dictionary<ECameraFilter, FilterProgress> BuildDiagnosticFilterProgress(ScheduledTargetDto target)
+    {
+        var repeatCount = Math.Max(1, target.RepeatCount);
+        if (target.IsMosaic && target.HasPanels)
+        {
+            var panelGoals = target.Panels?
+                .Where(p => p.IsEnabled)
+                .SelectMany(p => p.ImagingGoals ?? new List<PanelImagingGoalDto>())
+                .Where(g => g.IsEnabled)
+                .ToList();
+
+            if (panelGoals?.Any() == true)
+            {
+                return panelGoals
+                    .GroupBy(g => g.Filter)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => new FilterProgress
+                        {
+                            GoalMinutes = group.Sum(g => g.GoalTimeMinutes) * repeatCount,
+                            CompletedMinutes = group.Sum(g => g.CompletedTimeMinutes),
+                            ScheduledMinutes = 0,
+                            RemainingMinutes = Math.Max(0, (group.Sum(g => g.GoalTimeMinutes) * repeatCount) - group.Sum(g => g.CompletedTimeMinutes))
+                        });
+            }
+        }
+
+        return (target.ImagingGoals ?? new List<ImagingGoalDto>())
+            .Where(g => g.IsEnabled)
+            .GroupBy(g => g.Filter)
+            .ToDictionary(
+                group => group.Key,
+                group => new FilterProgress
+                {
+                    GoalMinutes = group.Sum(g => g.GoalTimeMinutes) * repeatCount,
+                    CompletedMinutes = group.Sum(g => g.CompletedTimeMinutes),
+                    ScheduledMinutes = 0,
+                    RemainingMinutes = Math.Max(0, (group.Sum(g => g.GoalTimeMinutes) * repeatCount) - group.Sum(g => g.CompletedTimeMinutes))
+                });
     }
 
     private static string? BuildNoScheduleDiagnosticsForTarget(List<UnscheduledSlotDto>? unscheduledSlots, string targetName)
@@ -1547,17 +1638,25 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             
             // Calculate priorities for observable targets
             var targetPriorities = observableTargets
-                .Select(targetId => new
+                .Select(targetId =>
                 {
-                    TargetId = targetId,
-                    State = targetStates[targetId],
-                    Priority = CalculatePriorityScore(targetStates[targetId], configuration, slot.Start)
+                    var state = targetStates[targetId];
+                    var scoreResult = CalculateTargetScore(state, configuration, slot.Start);
+
+                    return new ScoredTargetCandidate
+                    {
+                        TargetId = targetId,
+                        State = state,
+                        Score = scoreResult.TotalScore,
+                        ScoreResult = scoreResult
+                    };
                 })
-                .OrderByDescending(t => t.Priority)
+                .OrderByDescending(t => t.Score)
                 .ToList();
 
             // Select highest priority target that hasn't exceeded constraints
             TargetSchedulingState? selectedState = null;
+            ScoredTargetCandidate? selectedCandidate = null;
             
             // Track targets that failed to produce segments (for retry with next target)
             var failedTargetsThisSlot = new HashSet<Guid>();
@@ -1565,6 +1664,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             // AltitudeFirst switching penalty: only switch if new target is 2°+ higher and not declining faster
             var previousState = previousTargetId.HasValue && targetStates.ContainsKey(previousTargetId.Value) 
                 ? targetStates[previousTargetId.Value] 
+                : null;
+            var previousCandidate = previousTargetId.HasValue
+                ? targetPriorities.FirstOrDefault(tp => (tp.State.PanelId ?? tp.State.Target.Id) == previousTargetId.Value)
                 : null;
             var applyAltitudeSwitchingPenalty = configuration.PrimaryStrategy == TargetSelectionStrategy.AltitudeFirst 
                 && previousState?.CurrentPeriod != null;
@@ -1575,7 +1677,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 var top = targetPriorities.Take(3).ToList();
                 _logger.LogInformation("Slot {Start:HH:mm}: Top targets: {Targets}",
                     slot.Start,
-                    string.Join(", ", top.Select(t => $"{t.State.Target.Name} P{t.State.PanelNumber}={t.Priority:F0} alt={t.State.CurrentPeriod?.Altitude:F1}°")));
+                    string.Join(", ", top.Select(t => $"{t.State.Target.Name} P{t.State.PanelNumber}={t.Score:F1} alt={t.State.CurrentPeriod?.Altitude:F1}°")));
             }
 
             // Retry target selection loop - if selected target produces 0 segments, try next target
@@ -1583,6 +1685,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             while (failedTargetsThisSlot.Count < observableTargets.Count)
             {
             selectedState = null;
+            selectedCandidate = null;
             
             foreach (var tp in targetPriorities)
             {
@@ -1680,6 +1783,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                             _logger.LogInformation("AltitudeFirst: Staying on '{Prev}' P{PrevPanel} ({PrevAlt:F1}°) instead of '{New}' ({NewAlt:F1}°) - only {Diff:F1}° higher",
                                 previousState.Target.Name, previousState.PanelNumber, prevAlt, state.Target.Name, newAlt, altDiff);
                             selectedState = previousState;
+                            selectedCandidate = previousCandidate;
                             break;
                         }
                     }
@@ -1689,6 +1793,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 }
 
                 selectedState = state;
+                selectedCandidate = tp;
                 break;
             }
 
@@ -1791,6 +1896,10 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                             FilterSegments = $"{segment.Filter}:{segment.Exposures}",
                             Status = "Planned",
                             IsManualOverride = false,
+                            ScheduledPriority = (int)Math.Round(selectedCandidate?.Score ?? 0),
+                            PriorityScore = selectedCandidate?.Score,
+                            ScoreBreakdown = CloneScoreBreakdown(selectedCandidate?.ScoreResult.Breakdown),
+                            SelectionReason = BuildSelectionReason(selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 }, period),
                             FilterShootMethod = filterShootMethod,
                             BatchSize = batchSizeForSession,
                             MoonDistance = period.MoonDistance,
@@ -1885,6 +1994,10 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         FilterSegments = $"{filter.Value}:{exposures}",
                         Status = "Planned",
                         IsManualOverride = false,
+                        ScheduledPriority = (int)Math.Round(selectedCandidate?.Score ?? 0),
+                        PriorityScore = selectedCandidate?.Score,
+                        ScoreBreakdown = CloneScoreBreakdown(selectedCandidate?.ScoreResult.Breakdown),
+                        SelectionReason = BuildSelectionReason(selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 }, period),
                         FilterShootMethod = filterShootMethod,
                         BatchSize = batchSizeForSession,
                         MoonDistance = period.MoonDistance,
@@ -1930,11 +2043,15 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 
                 _logger.LogInformation("Slot {Start:HH:mm}-{End:HH:mm}: NO TARGET SCHEDULED after trying {Failed} targets",
                     slot.Start, slot.End, failedTargetsThisSlot.Count);
+                var bestCandidate = targetPriorities.FirstOrDefault();
                 unscheduledSlots.Add(new UnscheduledSlotDto
                 {
                     StartTimeUtc = slot.Start,
                     EndTimeUtc = slot.End,
-                    Reason = reason
+                    Reason = reason,
+                    BestCandidateTargetName = bestCandidate?.State.Target.Name,
+                    BestCandidateScore = bestCandidate?.Score,
+                    BestCandidateScoreBreakdown = CloneScoreBreakdown(bestCandidate?.ScoreResult.Breakdown)
                 });
                 continue;
             }
@@ -2344,7 +2461,10 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             BatchSize = session.BatchSize,
             MoonDistance = session.MoonDistance,
             MoonIllumination = session.MoonIllumination,
-            RequiredMoonDistance = session.RequiredMoonDistance
+            RequiredMoonDistance = session.RequiredMoonDistance,
+            PriorityScore = session.PriorityScore,
+            ScoreBreakdown = CloneScoreBreakdown(session.ScoreBreakdown),
+            SelectionReason = session.SelectionReason
         };
         
         // Initialize FilterSegments if not set (for the first session in a merge)
@@ -2356,7 +2476,52 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         return clone;
     }
 
+    private static List<SchedulerScoreContributionDto>? CloneScoreBreakdown(List<SchedulerScoreContributionDto>? source)
+    {
+        return source?.Select(item => new SchedulerScoreContributionDto
+        {
+            Metric = item.Metric,
+            Value = item.Value,
+            Weight = item.Weight,
+            NormalizedScore = item.NormalizedScore,
+            WeightedScore = item.WeightedScore,
+            PreferHigherValues = item.PreferHigherValues,
+            ZeroScoreThreshold = item.ZeroScoreThreshold,
+            FullScoreThreshold = item.FullScoreThreshold,
+            DisplayValue = item.DisplayValue
+        }).ToList();
+    }
+
+    private TargetScoreResult CalculateTargetScore(
+        TargetSchedulingState state,
+        SchedulerConfigurationDto configuration,
+        DateTime currentTime)
+    {
+        var mode = configuration.PrioritizationMode ?? PrioritizationMode.Simple;
+        var weightedCriteria = configuration.WeightedCriteria?
+            .Where(c => c.Weight > 0)
+            .ToList();
+
+        if (mode == PrioritizationMode.Weighted && weightedCriteria?.Any() == true)
+        {
+            return CalculateWeightedTargetScore(state, weightedCriteria, currentTime);
+        }
+
+        return new TargetScoreResult
+        {
+            TotalScore = CalculateSimplePriorityScore(state, configuration, currentTime)
+        };
+    }
+
     private double CalculatePriorityScore(
+        TargetSchedulingState state,
+        SchedulerConfigurationDto configuration,
+        DateTime currentTime)
+    {
+        return CalculateTargetScore(state, configuration, currentTime).TotalScore;
+    }
+
+    private double CalculateSimplePriorityScore(
         TargetSchedulingState state,
         SchedulerConfigurationDto configuration,
         DateTime currentTime)
@@ -2403,6 +2568,46 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         return score;
     }
 
+    private TargetScoreResult CalculateWeightedTargetScore(
+        TargetSchedulingState state,
+        List<SchedulerWeightedCriterionDto> criteria,
+        DateTime currentTime)
+    {
+        var contributions = new List<SchedulerScoreContributionDto>();
+        double totalScore = 0;
+
+        foreach (var criterion in criteria)
+        {
+            var value = GetWeightedMetricValue(state, criterion.Metric, currentTime);
+            var (defaultZero, defaultFull) = GetDefaultThresholds(criterion.Metric, criterion.PreferHigherValues);
+            var zeroThreshold = criterion.ZeroScoreThreshold ?? defaultZero;
+            var fullThreshold = criterion.FullScoreThreshold ?? defaultFull;
+            var normalizedScore = NormalizeWeightedValue(value, zeroThreshold, fullThreshold, criterion.PreferHigherValues);
+            var weightedScore = normalizedScore * criterion.Weight;
+
+            contributions.Add(new SchedulerScoreContributionDto
+            {
+                Metric = criterion.Metric,
+                Value = value,
+                Weight = criterion.Weight,
+                NormalizedScore = normalizedScore,
+                WeightedScore = weightedScore,
+                PreferHigherValues = criterion.PreferHigherValues,
+                ZeroScoreThreshold = criterion.ZeroScoreThreshold,
+                FullScoreThreshold = criterion.FullScoreThreshold,
+                DisplayValue = FormatMetricDisplayValue(criterion.Metric, value)
+            });
+
+            totalScore += weightedScore;
+        }
+
+        return new TargetScoreResult
+        {
+            TotalScore = totalScore,
+            Breakdown = contributions
+        };
+    }
+
     private double CalculateStrategyScore(
         TargetSchedulingState state,
         TargetSelectionStrategy strategy,
@@ -2416,8 +2621,131 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             TargetSelectionStrategy.TimeFirst => CalculateTimeWindowScore(state), // Shortest time = highest score
             TargetSelectionStrategy.HighestTimeFirst => GetRemainingTimeMinutes(state), // Longest time = highest score
             TargetSelectionStrategy.MoonAvoidanceFirst => CalculateMoonAvoidanceScore(state),
+            TargetSelectionStrategy.HighestCompletionFirst => GetCompletionPercentage(state),
             _ => 0
         };
+    }
+
+    private double GetWeightedMetricValue(
+        TargetSchedulingState state,
+        SchedulerWeightedMetric metric,
+        DateTime currentTime)
+    {
+        return metric switch
+        {
+            SchedulerWeightedMetric.Priority => state.CurrentPriority,
+            SchedulerWeightedMetric.Altitude => CalculateCurrentAltitude(state, currentTime),
+            SchedulerWeightedMetric.ObservableMinutes => state.ObservableMinutesTonight,
+            SchedulerWeightedMetric.RemainingTimeMinutes => GetRemainingTimeMinutes(state),
+            SchedulerWeightedMetric.MoonDistance => state.CurrentPeriod?.MoonDistance ?? 0,
+            SchedulerWeightedMetric.CompletionPercentage => GetCompletionPercentage(state),
+            _ => 0
+        };
+    }
+
+    private double CalculateCurrentAltitude(TargetSchedulingState state, DateTime currentTime)
+    {
+        return state.CurrentPeriod?.Altitude ?? CalculateAltitudeScore(state, currentTime);
+    }
+
+    private double GetCompletionPercentage(TargetSchedulingState state)
+    {
+        var goalMinutes = state.FilterProgress.Values.Sum(fp => fp.GoalMinutes);
+        if (goalMinutes <= 0)
+        {
+            return 0;
+        }
+
+        var completedMinutes = state.FilterProgress.Values.Sum(fp => fp.CompletedMinutes + fp.ScheduledMinutes);
+        return Math.Clamp((completedMinutes / goalMinutes) * 100.0, 0, 100);
+    }
+
+    private static (double Zero, double Full) GetDefaultThresholds(
+        SchedulerWeightedMetric metric,
+        bool preferHigherValues)
+    {
+        var (naturalMin, naturalMax) = metric switch
+        {
+            SchedulerWeightedMetric.Priority => (1d, 99d),
+            SchedulerWeightedMetric.Altitude => (0d, 90d),
+            SchedulerWeightedMetric.ObservableMinutes => (0d, 720d),
+            SchedulerWeightedMetric.RemainingTimeMinutes => (0d, 720d),
+            SchedulerWeightedMetric.MoonDistance => (0d, 180d),
+            SchedulerWeightedMetric.CompletionPercentage => (0d, 100d),
+            _ => (0d, 100d)
+        };
+
+        return preferHigherValues ? (naturalMin, naturalMax) : (naturalMax, naturalMin);
+    }
+
+    private static double NormalizeWeightedValue(
+        double value,
+        double zeroThreshold,
+        double fullThreshold,
+        bool preferHigherValues)
+    {
+        if (Math.Abs(fullThreshold - zeroThreshold) < 0.000001)
+        {
+            return preferHigherValues
+                ? (value >= fullThreshold ? 1 : 0)
+                : (value <= fullThreshold ? 1 : 0);
+        }
+
+        if (preferHigherValues)
+        {
+            if (value <= zeroThreshold)
+            {
+                return 0;
+            }
+
+            if (value >= fullThreshold)
+            {
+                return 1;
+            }
+
+            return (value - zeroThreshold) / (fullThreshold - zeroThreshold);
+        }
+
+        if (value >= zeroThreshold)
+        {
+            return 0;
+        }
+
+        if (value <= fullThreshold)
+        {
+            return 1;
+        }
+
+        return (zeroThreshold - value) / (zeroThreshold - fullThreshold);
+    }
+
+    private static string FormatMetricDisplayValue(SchedulerWeightedMetric metric, double value)
+    {
+        return metric switch
+        {
+            SchedulerWeightedMetric.Priority => $"P{value:F0}",
+            SchedulerWeightedMetric.Altitude => $"{value:F1}°",
+            SchedulerWeightedMetric.ObservableMinutes => $"{value:F0} min",
+            SchedulerWeightedMetric.RemainingTimeMinutes => $"{value:F0} min",
+            SchedulerWeightedMetric.MoonDistance => $"{value:F1}°",
+            SchedulerWeightedMetric.CompletionPercentage => $"{value:F1}%",
+            _ => value.ToString("F2")
+        };
+    }
+
+    private static string BuildSelectionReason(TargetScoreResult scoreResult, ObservablePeriod? period)
+    {
+        if (scoreResult.Breakdown?.Any() == true)
+        {
+            var topParts = scoreResult.Breakdown
+                .OrderByDescending(item => item.WeightedScore)
+                .Take(3)
+                .Select(item => $"{item.Metric} {item.WeightedScore:F1}");
+
+            return $"Score={scoreResult.TotalScore:F1}, {string.Join(", ", topParts)}";
+        }
+
+        return $"Priority={scoreResult.TotalScore:F0}, Alt={period?.Altitude:F1}°";
     }
 
     private double GetRemainingTimeMinutes(TargetSchedulingState state)
@@ -3525,20 +3853,25 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             
             // Score and sort targets using same algorithm as preview
             var scoredTargets = nowObservableTargets
-                .Select(t => new
+                .Select(t =>
                 {
-                    t.TargetId,
-                    t.State,
-                    t.Period,
-                    Priority = CalculatePriorityScore(t.State, configuration, currentTime)
+                    var scoreResult = CalculateTargetScore(t.State, configuration, currentTime);
+                    return new
+                    {
+                        t.TargetId,
+                        t.State,
+                        t.Period,
+                        Score = scoreResult.TotalScore,
+                        ScoreResult = scoreResult
+                    };
                 })
-                .OrderByDescending(t => t.Priority)
+                .OrderByDescending(t => t.Score)
                 .ToList();
             
             _logger.LogInformation("GetNextSlotAsync: {Count} targets observable now. Top: {Targets}",
                 scoredTargets.Count,
                 string.Join(", ", scoredTargets.Take(3).Select(t => 
-                    $"{t.State.Target.Name}={t.Priority:F0} alt={t.Period.Altitude:F1}°")));
+                    $"{t.State.Target.Name}={t.Score:F1} alt={t.Period.Altitude:F1}°")));
             
             // Try each target in priority order until we find one with an available goal
             foreach (var scored in scoredTargets)
@@ -3651,14 +3984,16 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     CurrentAltitude = period.Altitude,
                     MoonDistance = period.MoonDistance,
                     MoonIllumination = period.MoonIllumination * 100,
-                    SelectionReason = $"Priority={scored.Priority:F0}, Alt={period.Altitude:F1}°",
+                    PriorityScore = scored.Score,
+                    ScoreBreakdown = CloneScoreBreakdown(scored.ScoreResult.Breakdown),
+                    SelectionReason = BuildSelectionReason(scored.ScoreResult, period),
                     Message = panel != null 
                         ? $"{target.Name} P{panel.PanelNumber} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
                         : $"{target.Name} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
                 };
                 
-                _logger.LogInformation("GetNextSlotAsync: Selected {Target}{Panel} {Filter} (Alt={Alt:F1}°, MoonDist={Moon:F1}°, Priority={Pri:F0})",
-                    target.Name, panel != null ? $" P{panel.PanelNumber}" : "", goal.Filter, period.Altitude, period.MoonDistance, scored.Priority);
+                _logger.LogInformation("GetNextSlotAsync: Selected {Target}{Panel} {Filter} (Alt={Alt:F1}°, MoonDist={Moon:F1}°, Score={Score:F1})",
+                    target.Name, panel != null ? $" P{panel.PanelNumber}" : "", goal.Filter, period.Altitude, period.MoonDistance, scored.Score);
                 
                 return result;
             }
@@ -3850,4 +4185,18 @@ internal class TimeSlot
 {
     public DateTime Start { get; set; }
     public DateTime End { get; set; }
+}
+
+internal sealed class TargetScoreResult
+{
+    public double TotalScore { get; set; }
+    public List<SchedulerScoreContributionDto>? Breakdown { get; set; }
+}
+
+internal sealed class ScoredTargetCandidate
+{
+    public Guid TargetId { get; set; }
+    public TargetSchedulingState State { get; set; } = null!;
+    public double Score { get; set; }
+    public TargetScoreResult ScoreResult { get; set; } = new();
 }

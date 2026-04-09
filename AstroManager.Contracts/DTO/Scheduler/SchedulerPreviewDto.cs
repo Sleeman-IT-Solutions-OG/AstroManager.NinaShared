@@ -131,6 +131,9 @@ public class UnscheduledSlotDto
     public DateTime StartTimeUtc { get; set; }
     public DateTime EndTimeUtc { get; set; }
     public string Reason { get; set; } = string.Empty;
+    public string? BestCandidateTargetName { get; set; }
+    public double? BestCandidateScore { get; set; }
+    public List<SchedulerScoreContributionDto>? BestCandidateScoreBreakdown { get; set; }
     
     /// <summary>
     /// Start time in local time for display
@@ -440,6 +443,8 @@ public class SchedulerPreviewSessionDto
     /// Priority score that determined selection
     /// </summary>
     public double PriorityScore { get; set; }
+
+    public List<SchedulerScoreContributionDto>? ScoreBreakdown { get; set; }
     
     /// <summary>
     /// Reason this target/session was selected
@@ -541,6 +546,10 @@ public class SchedulerPreviewSkippedTargetDto
     public int? PanelNumber { get; set; }
     public string Reason { get; set; } = string.Empty;
     public SkipReason ReasonCode { get; set; }
+    public double? PriorityScore { get; set; }
+    public List<SchedulerScoreContributionDto>? ScoreBreakdown { get; set; }
+    public string? WinningTargetName { get; set; }
+    public double? WinningTargetScore { get; set; }
     
     /// <summary>
     /// Detailed explanation of why the target was skipped (human-readable)

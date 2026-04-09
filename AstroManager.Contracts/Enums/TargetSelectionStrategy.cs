@@ -28,5 +28,10 @@ public enum TargetSelectionStrategy
     /// <summary>
     /// Select targets with filters requiring largest moon avoidance distance first
     /// </summary>
-    MoonAvoidanceFirst
+    MoonAvoidanceFirst,
+
+    /// <summary>
+    /// Select targets with the highest imaging goal completion percentage first
+    /// </summary>
+    HighestCompletionFirst
 }

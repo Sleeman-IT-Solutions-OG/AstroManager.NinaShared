@@ -338,6 +338,16 @@ public class ClientStatusDto
     /// Scheduler configuration name currently in use
     /// </summary>
     public string? SchedulerConfigurationName { get; set; }
+
+    /// <summary>
+    /// Default scheduler configuration assigned to this client.
+    /// </summary>
+    public Guid? DefaultSchedulerConfigurationId { get; set; }
+
+    /// <summary>
+    /// Default scheduler configuration name assigned to this client.
+    /// </summary>
+    public string? DefaultSchedulerConfigurationName { get; set; }
     
     /// <summary>
     /// Whether the scheduler is using the default config (vs explicitly set in sequence)
@@ -403,6 +413,32 @@ public class ClientStatusDto
     /// Client software version
     /// </summary>
     public string? ClientVersion { get; set; }
+
+    /// <summary>
+    /// Set by API responses that include scheduler compatibility evaluation.
+    /// Null means no compatibility context was supplied in this payload.
+    /// </summary>
+    public bool? HasSchedulerCompatibilityContext { get; set; }
+
+    /// <summary>
+    /// Short scheduler compatibility warning shown in the UI.
+    /// </summary>
+    public string? SchedulerCompatibilitySummary { get; set; }
+
+    /// <summary>
+    /// Expanded scheduler compatibility details shown in the UI.
+    /// </summary>
+    public string? SchedulerCompatibilityDetails { get; set; }
+
+    /// <summary>
+    /// Minimum N.I.N.A. plugin version required by the default scheduler configuration.
+    /// </summary>
+    public string? SchedulerCompatibilityMinimumPluginVersion { get; set; }
+
+    /// <summary>
+    /// True when compatibility could not be verified because the client did not report a plugin version.
+    /// </summary>
+    public bool? IsSchedulerCompatibilityVersionUnknown { get; set; }
     
     /// <summary>
     /// Pending commands count

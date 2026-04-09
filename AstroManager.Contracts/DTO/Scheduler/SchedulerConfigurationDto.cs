@@ -33,6 +33,17 @@ public class SchedulerConfigurationDto
     public TargetSelectionStrategy? SecondaryStrategy { get; set; }
     
     public TargetSelectionStrategy? TertiaryStrategy { get; set; }
+
+    /// <summary>
+    /// Null means legacy payload without explicit mode. Server should treat create as Simple and preserve on update.
+    /// </summary>
+    public PrioritizationMode? PrioritizationMode { get; set; }
+
+    /// <summary>
+    /// Null means omitted from payload and should be preserved by the server on update.
+    /// Empty collection means explicitly cleared.
+    /// </summary>
+    public List<SchedulerWeightedCriterionDto>? WeightedCriteria { get; set; }
     
     public List<string> ObjectTypeFilter { get; set; } = new List<string>();
     

@@ -164,5 +164,7 @@ public class RealTimeSlotResult
     public double? CurrentAltitude { get; set; }
     public double? MoonDistance { get; set; }
     public double? MoonIllumination { get; set; }
+    public double? PriorityScore { get; set; }
+    public List<SchedulerScoreContributionDto>? ScoreBreakdown { get; set; }
     public string? SelectionReason { get; set; }
 }

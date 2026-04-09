@@ -76,6 +76,10 @@ public class ScheduledSessionDto
     public string? Notes { get; set; }
     
     public int ScheduledPriority { get; set; }
+
+    public double? PriorityScore { get; set; }
+    public List<SchedulerScoreContributionDto>? ScoreBreakdown { get; set; }
+    public string? SelectionReason { get; set; }
     
     public double? AverageAltitude { get; set; }
     public double? MoonIllumination { get; set; }
