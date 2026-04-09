@@ -1031,8 +1031,14 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
 
                 skipped.DetailedExplanation +=
                     $" Best overlapping scheduled target: {skipped.WinningTargetName} " +
-                    $"({winningSession.StartTimeLocal:HH:mm}-{winningSession.EndTimeLocal:HH:mm}) " +
-                    $"with score {winningSession.PriorityScore:F1} versus {skipped.PriorityScore:F1}.";
+                    $"({winningSession.StartTimeLocal:HH:mm}-{winningSession.EndTimeLocal:HH:mm})";
+
+                if ((configuration.PrioritizationMode ?? PrioritizationMode.Simple) == PrioritizationMode.Weighted)
+                {
+                    skipped.DetailedExplanation += $" with score {winningSession.PriorityScore:F1} versus {skipped.PriorityScore:F1}";
+                }
+
+                skipped.DetailedExplanation += ".";
             }
         }
 
@@ -1899,7 +1905,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                             ScheduledPriority = (int)Math.Round(selectedCandidate?.Score ?? 0),
                             PriorityScore = selectedCandidate?.Score,
                             ScoreBreakdown = CloneScoreBreakdown(selectedCandidate?.ScoreResult.Breakdown),
-                            SelectionReason = BuildSelectionReason(selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 }, period),
+                            SelectionReason = BuildSelectionReason(
+                                selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 },
+                                selectedState,
+                                configuration,
+                                period),
                             FilterShootMethod = filterShootMethod,
                             BatchSize = batchSizeForSession,
                             MoonDistance = period.MoonDistance,
@@ -1997,7 +2007,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         ScheduledPriority = (int)Math.Round(selectedCandidate?.Score ?? 0),
                         PriorityScore = selectedCandidate?.Score,
                         ScoreBreakdown = CloneScoreBreakdown(selectedCandidate?.ScoreResult.Breakdown),
-                        SelectionReason = BuildSelectionReason(selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 }, period),
+                        SelectionReason = BuildSelectionReason(
+                            selectedCandidate?.ScoreResult ?? new TargetScoreResult { TotalScore = 0 },
+                            selectedState,
+                            configuration,
+                            period),
                         FilterShootMethod = filterShootMethod,
                         BatchSize = batchSizeForSession,
                         MoonDistance = period.MoonDistance,
@@ -2733,7 +2747,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         };
     }
 
-    private static string BuildSelectionReason(TargetScoreResult scoreResult, ObservablePeriod? period)
+    private string BuildSelectionReason(
+        TargetScoreResult scoreResult,
+        TargetSchedulingState state,
+        SchedulerConfigurationDto configuration,
+        ObservablePeriod? period)
     {
         if (scoreResult.Breakdown?.Any() == true)
         {
@@ -2745,7 +2763,18 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             return $"Score={scoreResult.TotalScore:F1}, {string.Join(", ", topParts)}";
         }
 
-        return $"Priority={scoreResult.TotalScore:F0}, Alt={period?.Altitude:F1}°";
+        var primaryReason = configuration.PrimaryStrategy switch
+        {
+            TargetSelectionStrategy.PriorityFirst => $"Priority {state.CurrentPriority}",
+            TargetSelectionStrategy.AltitudeFirst => $"Highest altitude ({period?.Altitude:F1}°)",
+            TargetSelectionStrategy.TimeFirst => $"Shortest remaining time ({GetRemainingTimeMinutes(state):F0} min)",
+            TargetSelectionStrategy.HighestTimeFirst => $"Most remaining time ({GetRemainingTimeMinutes(state):F0} min)",
+            TargetSelectionStrategy.MoonAvoidanceFirst => $"Best moon separation ({period?.MoonDistance:F1}°)",
+            TargetSelectionStrategy.HighestCompletionFirst => $"Highest completion ({GetCompletionPercentage(state):F1}%)",
+            _ => $"Priority={scoreResult.TotalScore:F0}"
+        };
+
+        return primaryReason;
     }
 
     private double GetRemainingTimeMinutes(TargetSchedulingState state)
@@ -3536,6 +3565,36 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         
         return effective;
     }
+
+    private static double CalculateRemainingContinuousObservableMinutes(TargetObservableWindow window, DateTime currentTime)
+    {
+        var totalMinutes = 0d;
+        var cursor = currentTime;
+        var periods = window.ObservablePeriods
+            .Where(p => p.IsObservable && p.EndTime > currentTime)
+            .OrderBy(p => p.StartTime)
+            .ToList();
+
+        foreach (var period in periods)
+        {
+            if (period.EndTime <= cursor)
+                continue;
+
+            // Periods are sampled at fixed intervals. A small tolerance keeps
+            // adjacent samples continuous despite second-level call timing.
+            if (period.StartTime > cursor.AddMinutes(1))
+                break;
+
+            var segmentStart = period.StartTime > cursor ? period.StartTime : cursor;
+            if (period.EndTime <= segmentStart)
+                continue;
+
+            totalMinutes += (period.EndTime - segmentStart).TotalMinutes;
+            cursor = period.EndTime;
+        }
+
+        return totalMinutes;
+    }
     
     /// <summary>
     /// Get effective min session duration for a target (template → config).
@@ -3784,7 +3843,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             var targetStates = InitializeTargetStates(targets);
             
             // Find targets observable RIGHT NOW (current time within an observable period)
-            var nowObservableTargets = new List<(Guid TargetId, TargetSchedulingState State, ObservablePeriod Period)>();
+            var nowObservableTargets = new List<(Guid TargetId, TargetSchedulingState State, ObservablePeriod Period, TargetObservableWindow Window)>();
             
             foreach (var window in observableWindows)
             {
@@ -3811,7 +3870,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         astronomicalDawn,
                         GetEffectiveUseMoonAvoidance(state.Target, configuration) ? moonAvoidanceProfiles : new List<UserFilterMoonAvoidanceProfileDto>());
                     
-                    nowObservableTargets.Add((window.TargetId, state, currentPeriod));
+                    nowObservableTargets.Add((window.TargetId, state, currentPeriod, window));
                 }
             }
             
@@ -3861,6 +3920,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         t.TargetId,
                         t.State,
                         t.Period,
+                        t.Window,
                         Score = scoreResult.TotalScore,
                         ScoreResult = scoreResult
                     };
@@ -3874,6 +3934,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     $"{t.State.Target.Name}={t.Score:F1} alt={t.Period.Altitude:F1}°")));
             
             // Try each target in priority order until we find one with an available goal
+            var targetsSkippedForShortWindow = new List<string>();
             foreach (var scored in scoredTargets)
             {
                 var state = scored.State;
@@ -3943,6 +4004,29 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     goal.Filter, goal.FilterPriority, filterPattern);
                 var total = goal.GoalExposureCount * repeatCount;
                 var template = goal.ExposureTemplate;
+
+                var isContinuingCurrentTarget = currentTargetId == target.Id &&
+                    (!state.IsMosaicPanel || currentPanelId == state.PanelId);
+                var effectiveMinSessionDuration = GetEffectiveMinSessionDuration(target, configuration);
+                var remainingObservableMinutes = CalculateRemainingContinuousObservableMinutes(scored.Window, currentTime);
+                var selectedGoalRemainingMinutes = Math.Max(0, (goal.GoalTimeMinutes * repeatCount) - goal.CompletedTimeMinutes);
+                var isFinishingSmallGoal = selectedGoalRemainingMinutes > 0 &&
+                    selectedGoalRemainingMinutes < effectiveMinSessionDuration;
+
+                if (!isContinuingCurrentTarget &&
+                    effectiveMinSessionDuration > 0 &&
+                    remainingObservableMinutes < effectiveMinSessionDuration &&
+                    !isFinishingSmallGoal)
+                {
+                    targetsSkippedForShortWindow.Add($"{target.Name}{(panel != null ? $" P{panel.PanelNumber}" : string.Empty)}: {remainingObservableMinutes:F0}min < {effectiveMinSessionDuration}min");
+                    _logger.LogInformation(
+                        "GetNextSlotAsync: Skipping {Target}{Panel} because only {Remaining:F1}min remain observable, below min session duration {Min}min",
+                        target.Name,
+                        panel != null ? $" P{panel.PanelNumber}" : string.Empty,
+                        remainingObservableMinutes,
+                        effectiveMinSessionDuration);
+                    continue;
+                }
                 
                 // Dither: use exposure template value, fallback to target template if -1
                 var ditherEvery = template?.DitherEveryX ?? -1;
@@ -3986,7 +4070,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     MoonIllumination = period.MoonIllumination * 100,
                     PriorityScore = scored.Score,
                     ScoreBreakdown = CloneScoreBreakdown(scored.ScoreResult.Breakdown),
-                    SelectionReason = BuildSelectionReason(scored.ScoreResult, period),
+                    SelectionReason = BuildSelectionReason(scored.ScoreResult, state, configuration, period),
                     Message = panel != null 
                         ? $"{target.Name} P{panel.PanelNumber} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
                         : $"{target.Name} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
@@ -3998,6 +4082,19 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 return result;
             }
             
+            if (targetsSkippedForShortWindow.Any())
+            {
+                var reason = string.Join("; ", targetsSkippedForShortWindow.Take(3));
+                _logger.LogInformation("GetNextSlotAsync: No slot selected because observable candidates were below minimum duration: {Reason}", reason);
+                return new RealTimeSlotResult
+                {
+                    HasSlot = false,
+                    ShouldWait = true,
+                    WaitMinutes = 5,
+                    Message = $"Observable targets are below minimum session duration ({reason})"
+                };
+            }
+
             // No target had available goals (all blocked by moon/altitude)
             _logger.LogWarning("GetNextSlotAsync: All observable targets have blocked filters");
             return new RealTimeSlotResult 
