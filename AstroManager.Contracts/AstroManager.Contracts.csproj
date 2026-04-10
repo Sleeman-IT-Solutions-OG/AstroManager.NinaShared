@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <NuGetAudit>false</NuGetAudit>
     <PackageId>AstroManager.Contracts</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.2.1</Version>
     <Authors>AstroManager</Authors>
     <Company>AstroManager</Company>
     <Description>Shared public DTOs and contracts used by the AstroManager N.I.N.A. plugin.</Description>
