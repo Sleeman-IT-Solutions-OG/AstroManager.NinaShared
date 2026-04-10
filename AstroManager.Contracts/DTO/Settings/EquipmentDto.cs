@@ -23,6 +23,7 @@ namespace Shared.Model.DTO.Settings
         public TelescopeDto Telescope { get; set; } = new TelescopeDto();
         public bool HasRotator { get; set; }
         public List<ECameraFilter> Filters { get; set; } = new();
+        public List<EquipmentFilterAssignmentDto> AssignedFilters { get; set; } = new();
         
         /// <summary>
         /// Default exposure times (in seconds) per filter for this equipment

@@ -125,6 +125,12 @@ public class NextSlotDto
     /// Whether client needs to change filter
     /// </summary>
     public bool RequiresFilterChange { get; set; }
+
+    /// <summary>
+    /// Whether the client should actively automate filter changes for this slot.
+    /// False for manual filter workflows where AstroManager or NINA only tracks the active filter.
+    /// </summary>
+    public bool ShouldAutomateFilterChanges { get; set; } = true;
     
     /// <summary>
     /// Minutes to wait (when SlotType is Wait)

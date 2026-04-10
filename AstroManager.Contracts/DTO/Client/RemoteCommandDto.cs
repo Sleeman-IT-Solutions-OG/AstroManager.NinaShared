@@ -270,6 +270,13 @@ public class CreateRemoteCommandDto
     public string? Note { get; set; }
 }
 
+public class SetManualCurrentFilterDto
+{
+    public Guid ClientLicenseId { get; set; }
+    public Guid EquipmentId { get; set; }
+    public string CurrentFilter { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// DTO for updating command status (from client)
 /// </summary>

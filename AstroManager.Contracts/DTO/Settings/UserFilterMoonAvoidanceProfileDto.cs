@@ -25,6 +25,21 @@ namespace Shared.Model.DTO.Settings
         public ECameraFilter Filter { get; set; }
 
         /// <summary>
+        /// Optional user filter definition ID for additive custom-filter support.
+        /// </summary>
+        public Guid? FilterDefinitionId { get; set; }
+
+        /// <summary>
+        /// Optional user-visible filter name.
+        /// </summary>
+        public string? FilterName { get; set; }
+
+        /// <summary>
+        /// Optional additive standard filter reference.
+        /// </summary>
+        public ECameraFilter? StandardFilter { get; set; }
+
+        /// <summary>
         /// Moon avoidance profile ID assigned to this filter
         /// </summary>
         [Required]

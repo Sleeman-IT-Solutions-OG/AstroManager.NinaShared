@@ -15,5 +15,7 @@ namespace Shared.Model.DTO.Settings
         public int PixelY { get; set; }
         public bool IsMono { get; set; }
         public double SkyPA { get; set; } = 0; // Sky Position Angle in degrees
+        public bool ManualFilterChanges { get; set; }
+        public EManualFilterChangeSource ManualFilterChangeSource { get; set; } = EManualFilterChangeSource.ManualFilterWheelInNina;
     }
 }
