@@ -202,6 +202,13 @@ public class SchedulerPreviewSessionDto
     /// Filter to use
     /// </summary>
     public ECameraFilter Filter { get; set; }
+
+    /// <summary>
+    /// Display filter name, including custom filters.
+    /// </summary>
+    public string? FilterName { get; set; }
+
+    public string EffectiveFilterName => !string.IsNullOrWhiteSpace(FilterName) ? FilterName : Filter.ToString();
     
     /// <summary>
     /// Planned effective imaging time (accounting for efficiency)
@@ -298,7 +305,7 @@ public class SchedulerPreviewSessionDto
         get
         {
             if (string.IsNullOrEmpty(FilterSegments))
-                return $"{Filter}:{PlannedExposures}";
+                return $"{EffectiveFilterName}:{PlannedExposures}";
             
             // Sum exposures by filter from the segment list
             var filterTotals = new Dictionary<string, int>();

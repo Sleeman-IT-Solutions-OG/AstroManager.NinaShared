@@ -49,6 +49,12 @@ public class ScheduledSessionDto
     
     [Required]
     public ECameraFilter Filter { get; set; }
+
+    /// <summary>
+    /// Canonical filter name for custom-filter-aware schedules.
+    /// Falls back to the legacy enum name when not set.
+    /// </summary>
+    public string? FilterName { get; set; }
     
     /// <summary>
     /// Filter shooting method (Loop, Batch, Priority)
@@ -106,7 +112,9 @@ public class ScheduledSessionDto
     /// Display string for filters - shows FilterSegments if available, otherwise single Filter.
     /// Example: "L:10,R:10,Ha:8" or just "L"
     /// </summary>
-    public string FilterDisplay => !string.IsNullOrEmpty(FilterSegments) ? FilterSegments : Filter.ToString();
+    public string EffectiveFilterName => !string.IsNullOrWhiteSpace(FilterName) ? FilterName : Filter.ToString();
+
+    public string FilterDisplay => !string.IsNullOrEmpty(FilterSegments) ? FilterSegments : EffectiveFilterName;
     
     /// <summary>
     /// Duration in minutes (calculated from start/end times)

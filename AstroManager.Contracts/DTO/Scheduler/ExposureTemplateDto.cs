@@ -27,6 +27,22 @@ public class ExposureTemplateDto
     /// </summary>
     [Required]
     public ECameraFilter Filter { get; set; }
+
+    /// <summary>
+    /// Additive v1.0.3 filter-definition reference for custom and standard filters.
+    /// </summary>
+    public Guid? FilterDefinitionId { get; set; }
+
+    /// <summary>
+    /// Additive v1.0.3 filter display/runtime name. Used for custom filters and as the canonical name for standard filters.
+    /// </summary>
+    [StringLength(120)]
+    public string? FilterName { get; set; }
+
+    /// <summary>
+    /// Additive v1.0.3 standard-filter mapping for custom filters that map onto legacy standard buckets.
+    /// </summary>
+    public ECameraFilter? StandardFilter { get; set; }
     
     /// <summary>
     /// Exposure time in seconds
@@ -133,7 +149,9 @@ public class ExposureTemplateDto
     /// <summary>
     /// Display name combining filter and exposure time (e.g., "Ha - 300s")
     /// </summary>
-    public string DisplayName => $"{Filter} - {ExposureTimeSeconds}s";
+    public string EffectiveFilterName => !string.IsNullOrWhiteSpace(FilterName) ? FilterName : (StandardFilter ?? Filter).ToString();
+
+    public string DisplayName => $"{EffectiveFilterName} - {ExposureTimeSeconds}s";
     
     /// <summary>
     /// Full display name with binning and gain if non-default
@@ -142,7 +160,7 @@ public class ExposureTemplateDto
     {
         get
         {
-            var parts = new List<string> { $"{Filter}", $"{ExposureTimeSeconds}s" };
+            var parts = new List<string> { $"{EffectiveFilterName}", $"{ExposureTimeSeconds}s" };
             if (Binning > 1) parts.Add($"Bin{Binning}");
             if (Gain >= 0) parts.Add($"G{Gain}");
             if (Offset >= 0) parts.Add($"O{Offset}");
@@ -162,6 +180,13 @@ public class CreateExposureTemplateDto
     
     [Required]
     public ECameraFilter Filter { get; set; }
+
+    public Guid? FilterDefinitionId { get; set; }
+
+    [StringLength(120)]
+    public string? FilterName { get; set; }
+
+    public ECameraFilter? StandardFilter { get; set; }
     
     [Required]
     [Range(1, 3600)]
@@ -210,6 +235,13 @@ public class UpdateExposureTemplateDto
     
     [Required]
     public ECameraFilter Filter { get; set; }
+
+    public Guid? FilterDefinitionId { get; set; }
+
+    [StringLength(120)]
+    public string? FilterName { get; set; }
+
+    public ECameraFilter? StandardFilter { get; set; }
     
     [Required]
     [Range(1, 3600)]

@@ -68,6 +68,12 @@ public class CapturedImageDto : IImageDisplayData
     /// Filter used for this capture
     /// </summary>
     public ECameraFilter Filter { get; set; }
+
+    /// <summary>
+    /// Canonical filter name for custom-filter-aware captures.
+    /// Falls back to legacy Filter when not set.
+    /// </summary>
+    public string? FilterName { get; set; }
     
     /// <summary>
     /// Exposure time in seconds
@@ -322,7 +328,7 @@ public class CapturedImageDto : IImageDisplayData
     double? IImageDisplayData.GuidingRmsRA => GuidingRmsRa;
     double? IImageDisplayData.GuidingRmsDec => GuidingRmsDec;
     double? IImageDisplayData.GuidingRmsTotal => GuidingRmsArcsec;
-    string? IImageDisplayData.Filter => Filter.ToString();
+    string? IImageDisplayData.Filter => !string.IsNullOrWhiteSpace(FilterName) ? FilterName : Filter.ToString();
     int? IImageDisplayData.GradeScore => GradeScore;
     string? IImageDisplayData.GradeBand => GradeBand;
 }
@@ -417,6 +423,7 @@ public class CapturedImageSummaryDto
 public class FilterImageStats
 {
     public ECameraFilter Filter { get; set; }
+    public string? FilterName { get; set; }
     public int ImageCount { get; set; }
     public int AcceptedCount { get; set; }
     public double IntegrationMinutes { get; set; }

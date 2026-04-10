@@ -312,7 +312,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 
                 // Find imaging goal for shot counts
                 var target = targets.FirstOrDefault(t => t.Id == s.ScheduledTargetId);
-                var imagingGoal = target?.ImagingGoals?.FirstOrDefault(g => g.Filter == s.Filter);
+                var imagingGoal = target?.ImagingGoals?.FirstOrDefault(g =>
+                    string.Equals(g.FilterName, s.EffectiveFilterName, StringComparison.OrdinalIgnoreCase)
+                    || g.Filter == s.Filter);
                 var goalMultiplier = Math.Max(1, target?.RepeatCount ?? 1);
                 int currentShots = imagingGoal?.CompletedExposures ?? 0;
                 int totalRequired = (imagingGoal?.GoalExposureCount ?? 0) * goalMultiplier;
@@ -336,7 +338,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         if (parts.Length == 2 && int.TryParse(parts[1], out var count))
                         {
                             var filterName = parts[0];
-                            var filterGoal = target?.ImagingGoals?.FirstOrDefault(g => g.Filter.ToString() == filterName && g.IsEnabled);
+                            var filterGoal = target?.ImagingGoals?.FirstOrDefault(g => string.Equals(g.FilterName, filterName, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
                             var expTimeSec = filterGoal?.ExposureTimeSeconds ?? 300;
                             
                             // Calculate duration for this segment (exposures * time per exposure / efficiency)
@@ -388,7 +390,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     {
                         var filterName = kvp.Key;
                         var planned = kvp.Value;
-                        var filterGoal = target?.ImagingGoals?.FirstOrDefault(g => g.Filter.ToString() == filterName && g.IsEnabled);
+                        var filterGoal = target?.ImagingGoals?.FirstOrDefault(g => string.Equals(GetFilterName(g), filterName, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
                         var goalWithMultiplier = (filterGoal?.GoalExposureCount ?? 0) * goalMultiplier;
                         filterProgressList.Add(new FilterProgressInfo
                         {
@@ -431,6 +433,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     StartTimeUtc = s.StartTimeUtc,
                     EndTimeUtc = s.EndTimeUtc,
                     Filter = s.Filter,
+                    FilterName = s.FilterName,
                     FilterSegments = s.FilterSegments,
                     PlannedExposures = s.PlannedExposures,
                     FilterProgressList = filterProgressList.Count > 0 ? filterProgressList : null,
@@ -887,7 +890,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         {
             // Find minimum required moon distance from profiles (using CalculateAvoidanceDistance based on moon phase)
             var minMoonDistance = moonAvoidanceProfiles
-                .Where(p => p.MoonAvoidanceProfile != null && target.ImagingGoals.Any(g => g.IsEnabled && g.Filter == p.Filter))
+                .Where(p => p.MoonAvoidanceProfile != null && target.ImagingGoals.Any(g =>
+                    g.IsEnabled &&
+                    ((!string.IsNullOrWhiteSpace(p.FilterName) && string.Equals(g.FilterName, p.FilterName, StringComparison.OrdinalIgnoreCase))
+                    || (p.FilterDefinitionId.HasValue && g.ExposureTemplate?.FilterDefinitionId == p.FilterDefinitionId)
+                    || (p.StandardFilter.HasValue && p.StandardFilter == g.StandardFilter))))
                 .Select(p => p.MoonAvoidanceProfile!.CalculateAvoidanceDistance(moonPosition.IlluminatedFraction))
                 .DefaultIfEmpty(30)
                 .Min();
@@ -1065,7 +1072,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         };
     }
 
-    private static Dictionary<ECameraFilter, FilterProgress> BuildDiagnosticFilterProgress(ScheduledTargetDto target)
+    private static Dictionary<string, FilterProgress> BuildDiagnosticFilterProgress(ScheduledTargetDto target)
     {
         var repeatCount = Math.Max(1, target.RepeatCount);
         if (target.IsMosaic && target.HasPanels)
@@ -1079,7 +1086,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             if (panelGoals?.Any() == true)
             {
                 return panelGoals
-                    .GroupBy(g => g.Filter)
+                    .GroupBy(g => g.FilterName, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(
                         group => group.Key,
                         group => new FilterProgress
@@ -1094,7 +1101,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
 
         return (target.ImagingGoals ?? new List<ImagingGoalDto>())
             .Where(g => g.IsEnabled)
-            .GroupBy(g => g.Filter)
+            .GroupBy(g => g.FilterName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
                 group => new FilterProgress
@@ -1149,14 +1156,14 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 {
                     // Use panel ID as the key for mosaic panel states
                     // Base goals should be synced to panel.ImagingGoals, but fall back to target goals if empty
-                    Dictionary<ECameraFilter, FilterProgress> filterProgress;
+                    Dictionary<string, FilterProgress> filterProgress;
                     
                     if (panel.ImagingGoals?.Any() == true)
                     {
                         // Use panel-specific goals - apply RepeatCount to goals
                         filterProgress = panel.ImagingGoals
                             .Where(g => g.IsEnabled)
-                            .GroupBy(g => g.Filter)
+                            .GroupBy(g => g.FilterName, StringComparer.OrdinalIgnoreCase)
                             .ToDictionary(
                                 group => group.Key,
                                 group => new FilterProgress
@@ -1175,7 +1182,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         // Fallback: use parent target's goals (base goals not synced yet) - apply RepeatCount
                         filterProgress = target.ImagingGoals
                             .Where(g => g.IsEnabled)
-                            .GroupBy(g => g.Filter)
+                            .GroupBy(g => g.FilterName, StringComparer.OrdinalIgnoreCase)
                             .ToDictionary(
                                 group => group.Key,
                                 group => new FilterProgress
@@ -1188,7 +1195,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     }
                     else
                     {
-                        filterProgress = new Dictionary<ECameraFilter, FilterProgress>();
+                        filterProgress = new Dictionary<string, FilterProgress>(StringComparer.OrdinalIgnoreCase);
                     }
                     
                     var panelState = new TargetSchedulingState
@@ -1224,7 +1231,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     CurrentBatchCount = 0,
                     FilterProgress = target.ImagingGoals
                         .Where(g => g.IsEnabled)
-                        .GroupBy(g => g.Filter)
+                        .GroupBy(g => g.FilterName, StringComparer.OrdinalIgnoreCase)
                         .ToDictionary(
                             group => group.Key,
                             group => new FilterProgress
@@ -1638,7 +1645,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 }
                 else
                 {
-                    state.BlockedFilters = new List<ECameraFilter>();
+                    state.BlockedFilters = new List<string>();
                 }
             }
             
@@ -1864,7 +1871,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     var existingSession = sessions.LastOrDefault(s =>
                         s.ScheduledTargetId == selectedState.Target.Id &&
                         s.PanelId == selectedState.PanelId &&
-                        s.Filter == segment.Filter &&
+                        string.Equals(s.EffectiveFilterName, segment.Filter, StringComparison.OrdinalIgnoreCase) &&
                         s.EndTimeUtc == segment.Start);
 
                     if (existingSession != null)
@@ -1878,7 +1885,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         double? requiredMoonDistance = null;
                         if (moonAvoidanceProfiles?.Any() == true)
                         {
-                            var filterProfile = moonAvoidanceProfiles.FirstOrDefault(p => p.Filter == segment.Filter);
+                            var filterProfile = moonAvoidanceProfiles.FirstOrDefault(p =>
+                                (!string.IsNullOrWhiteSpace(p.FilterName) && string.Equals(p.FilterName, segment.Filter, StringComparison.OrdinalIgnoreCase))
+                                || (p.StandardFilter.HasValue && p.StandardFilter == ResolveLegacyFilter(segment.Filter)));
                             if (filterProfile?.MoonAvoidanceProfile != null)
                             {
                                 requiredMoonDistance = filterProfile.MoonAvoidanceProfile.CalculateAvoidanceDistance(period.MoonIllumination);
@@ -1896,7 +1905,8 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                             SessionDate = date,
                             StartTimeUtc = segment.Start,
                             EndTimeUtc = segment.End,
-                            Filter = segment.Filter,
+                            Filter = ResolveLegacyFilter(segment.Filter),
+                            FilterName = segment.Filter,
                             PlannedDurationMinutes = plannedDuration,
                             PlannedExposures = segment.Exposures,
                             FilterSegments = $"{segment.Filter}:{segment.Exposures}",
@@ -1957,7 +1967,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 var existingSession = sessions.LastOrDefault(s =>
                     s.ScheduledTargetId == selectedState.Target.Id &&
                     s.PanelId == selectedState.PanelId &&
-                    s.Filter == filter.Value &&
+                    string.Equals(s.EffectiveFilterName, filter, StringComparison.OrdinalIgnoreCase) &&
                     s.EndTimeUtc == slot.Start);
 
                 if (existingSession != null)
@@ -1971,7 +1981,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     double? requiredMoonDistance = null;
                     if (moonAvoidanceProfiles?.Any() == true)
                     {
-                        var filterProfile = moonAvoidanceProfiles.FirstOrDefault(p => p.Filter == filter.Value);
+                        var filterProfile = moonAvoidanceProfiles.FirstOrDefault(p =>
+                            (!string.IsNullOrWhiteSpace(p.FilterName) && string.Equals(p.FilterName, filter, StringComparison.OrdinalIgnoreCase))
+                            || (p.StandardFilter.HasValue && p.StandardFilter == ResolveLegacyFilter(filter)));
                         if (filterProfile?.MoonAvoidanceProfile != null)
                         {
                             requiredMoonDistance = filterProfile.MoonAvoidanceProfile.CalculateAvoidanceDistance(period.MoonIllumination);
@@ -1980,7 +1992,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
 
                     // For non-batch patterns, calculate exposures
                     int exposureTimeSec = 300;
-                    var imagingGoal = selectedState.Target.ImagingGoals?.FirstOrDefault(g => g.Filter == filter.Value && g.IsEnabled);
+                    var imagingGoal = selectedState.Target.ImagingGoals?.FirstOrDefault(g => string.Equals(g.FilterName, filter, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
                     if (imagingGoal != null)
                     {
                         exposureTimeSec = imagingGoal.ExposureTimeSeconds > 0 ? imagingGoal.ExposureTimeSeconds : 300;
@@ -1998,10 +2010,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         SessionDate = date,
                         StartTimeUtc = slot.Start,
                         EndTimeUtc = slot.End,
-                        Filter = filter.Value,
+                        Filter = ResolveLegacyFilter(filter),
+                        FilterName = filter,
                         PlannedDurationMinutes = plannedDuration,
                         PlannedExposures = exposures,
-                        FilterSegments = $"{filter.Value}:{exposures}",
+                        FilterSegments = $"{filter}:{exposures}",
                         Status = "Planned",
                         IsManualOverride = false,
                         ScheduledPriority = (int)Math.Round(selectedCandidate?.Score ?? 0),
@@ -2019,17 +2032,17 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                         RequiredMoonDistance = requiredMoonDistance
                     });
                     
-                    UpdateFilterPatternState(selectedState, configuration, filter.Value, exposures, panelBatchCounts);
+                    UpdateFilterPatternState(selectedState, configuration, filter, exposures, panelBatchCounts);
                 }
 
                 // Update state
                 selectedState.ScheduledMinutesTonight += slotDuration;
                 selectedState.TotalScheduledMinutes += slotDuration;
 
-                if (selectedState.FilterProgress.ContainsKey(filter.Value))
+                if (selectedState.FilterProgress.ContainsKey(filter))
                 {
-                    selectedState.FilterProgress[filter.Value].ScheduledMinutes += plannedDuration;
-                    selectedState.FilterProgress[filter.Value].RemainingMinutes -= plannedDuration;
+                    selectedState.FilterProgress[filter].ScheduledMinutes += plannedDuration;
+                    selectedState.FilterProgress[filter].RemainingMinutes -= plannedDuration;
                 }
                 break; // Successfully scheduled - exit while loop
             }
@@ -2225,9 +2238,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         
         ScheduledSessionDto? currentMerged = null;
         // Track filter durations (in minutes) for each merged session
-        var currentFilterDurations = new Dictionary<ECameraFilter, double>();
+        var currentFilterDurations = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         // Track filter sequence in chronological order: (filter, duration)
-        var currentFilterSequence = new List<(ECameraFilter Filter, double DurationMinutes)>();
+        var currentFilterSequence = new List<(string Filter, double DurationMinutes)>();
         
         foreach (var session in orderedSessions)
         {
@@ -2238,9 +2251,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 currentMerged.FilterSegments = null; // Will be recalculated
                 currentMerged.PlannedExposures = 0; // Will be recalculated
                 currentFilterDurations.Clear();
-                currentFilterDurations[session.Filter] = session.PlannedDurationMinutes;
+                currentFilterDurations[currentMerged.EffectiveFilterName] = session.PlannedDurationMinutes;
                 currentFilterSequence.Clear();
-                currentFilterSequence.Add((session.Filter, session.PlannedDurationMinutes));
+                currentFilterSequence.Add((currentMerged.EffectiveFilterName, session.PlannedDurationMinutes));
             }
             else if (currentMerged.ScheduledTargetId == session.ScheduledTargetId &&
                      currentMerged.PanelId == session.PanelId &&
@@ -2251,20 +2264,22 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 currentMerged.PlannedDurationMinutes += session.PlannedDurationMinutes;
                 
                 // Track filter duration (not exposure count)
-                if (currentFilterDurations.ContainsKey(session.Filter))
-                    currentFilterDurations[session.Filter] += session.PlannedDurationMinutes;
+                var sessionFilterName = session.EffectiveFilterName;
+
+                if (currentFilterDurations.ContainsKey(sessionFilterName))
+                    currentFilterDurations[sessionFilterName] += session.PlannedDurationMinutes;
                 else
-                    currentFilterDurations[session.Filter] = session.PlannedDurationMinutes;
+                    currentFilterDurations[sessionFilterName] = session.PlannedDurationMinutes;
                 
                 // Track filter sequence - extend last segment if same filter, otherwise add new
-                if (currentFilterSequence.Count > 0 && currentFilterSequence[^1].Filter == session.Filter)
+                if (currentFilterSequence.Count > 0 && string.Equals(currentFilterSequence[^1].Filter, sessionFilterName, StringComparison.OrdinalIgnoreCase))
                 {
                     var last = currentFilterSequence[^1];
                     currentFilterSequence[^1] = (last.Filter, last.DurationMinutes + session.PlannedDurationMinutes);
                 }
                 else
                 {
-                    currentFilterSequence.Add((session.Filter, session.PlannedDurationMinutes));
+                    currentFilterSequence.Add((sessionFilterName, session.PlannedDurationMinutes));
                 }
             }
             else
@@ -2282,9 +2297,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 currentMerged.FilterSegments = null;
                 currentMerged.PlannedExposures = 0;
                 currentFilterDurations.Clear();
-                currentFilterDurations[session.Filter] = session.PlannedDurationMinutes;
+                currentFilterDurations[currentMerged.EffectiveFilterName] = session.PlannedDurationMinutes;
                 currentFilterSequence.Clear();
-                currentFilterSequence.Add((session.Filter, session.PlannedDurationMinutes));
+                currentFilterSequence.Add((currentMerged.EffectiveFilterName, session.PlannedDurationMinutes));
             }
         }
         
@@ -2323,7 +2338,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
     /// </summary>
     private int FinalizeSessionExposures(
         ScheduledSessionDto session,
-        List<(ECameraFilter Filter, double DurationMinutes)> filterSequence,
+        List<(string Filter, double DurationMinutes)> filterSequence,
         Dictionary<Guid, TargetSchedulingState> targetStates,
         double efficiencyPercent,
         int batchSize = 10,
@@ -2352,7 +2367,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         {
             // durationMinutes is already the effective imaging time (efficiency already applied)
             // Get exposure time for this filter
-            var goal = targetState?.Target.ImagingGoals?.FirstOrDefault(g => g.Filter == filter && g.IsEnabled);
+            var goal = targetState?.Target.ImagingGoals?.FirstOrDefault(g => string.Equals(GetFilterName(g), filter, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
             var exposureTimeMin = (goal?.ExposureTimeSeconds ?? 300) / 60.0;
             
             var exposures = (int)Math.Floor(durationMinutes / exposureTimeMin);
@@ -2424,7 +2439,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             bool isFinishingSmallGoals = false;
             if (targetState != null)
             {
-                var filtersInBlock = block.Select(s => s.Filter).Distinct().ToList();
+                var filtersInBlock = block.Select(s => s.EffectiveFilterName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 var allFiltersHaveSmallRemainingGoals = filtersInBlock.All(filter =>
                 {
                     if (targetState.FilterProgress.TryGetValue(filter, out var progress))
@@ -2466,6 +2481,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             StartTimeUtc = session.StartTimeUtc,
             EndTimeUtc = session.EndTimeUtc,
             Filter = session.Filter,
+            FilterName = session.FilterName,
             PlannedDurationMinutes = session.PlannedDurationMinutes,
             PlannedExposures = session.PlannedExposures,
             FilterSegments = session.FilterSegments,
@@ -2875,7 +2891,22 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         }
     }
     
-    private List<ECameraFilter> CalculateBlockedFilters(
+    private static string GetFilterName(ImagingGoalDto goal)
+        => string.IsNullOrWhiteSpace(goal.FilterName) ? goal.Filter.ToString() : goal.FilterName;
+
+    private static string GetFilterName(PanelImagingGoalDto goal)
+        => string.IsNullOrWhiteSpace(goal.FilterName) ? goal.Filter.ToString() : goal.FilterName;
+
+    private static ECameraFilter? GetStandardFilter(ImagingGoalDto goal)
+        => goal.StandardFilter ?? goal.Filter;
+
+    private static ECameraFilter? GetStandardFilter(PanelImagingGoalDto goal)
+        => goal.StandardFilter ?? goal.Filter;
+
+    private static ECameraFilter ResolveLegacyFilter(string? filterName)
+        => Enum.TryParse<ECameraFilter>(filterName, true, out var parsed) ? parsed : ECameraFilter.L;
+
+    private List<string> CalculateBlockedFilters(
         ScheduledTargetDto target,
         double moonDistance,
         double moonIllumination,
@@ -2889,7 +2920,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         DateTime? astronomicalDawn,
         List<UserFilterMoonAvoidanceProfileDto> filterProfileMappings)
     {
-        var blockedFilters = new List<ECameraFilter>();
+        var blockedFilters = new List<string>();
         
         // Determine if we're in nautical twilight (between nautical and astronomical)
         // Evening nautical twilight: nauticalDusk <= time < astronomicalDusk
@@ -2906,11 +2937,11 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         var enabledGoals = target.ImagingGoals?.Where(g => g.IsEnabled).ToList() ?? new List<ImagingGoalDto>();
         
         // Get unique filters
-        var targetFilters = enabledGoals.Select(g => g.Filter).Distinct().ToList();
+        var targetFilters = enabledGoals.Select(GetFilterName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         
         foreach (var filter in targetFilters)
         {
-            var goalForFilter = enabledGoals.FirstOrDefault(g => g.Filter == filter);
+            var goalForFilter = enabledGoals.FirstOrDefault(g => string.Equals(GetFilterName(g), filter, StringComparison.OrdinalIgnoreCase));
             
             // Check per-filter AcceptableTwilight from ExposureTemplate
             // If we're in nautical twilight, only filters with AcceptableTwilight=Nautical can image
@@ -2941,7 +2972,10 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             }
             
             // Find the moon avoidance profile for this filter
-            var filterMapping = filterProfileMappings.FirstOrDefault(p => p.Filter == filter);
+            var filterMapping = filterProfileMappings.FirstOrDefault(p =>
+                (!string.IsNullOrWhiteSpace(p.FilterName) && string.Equals(p.FilterName, filter, StringComparison.OrdinalIgnoreCase))
+                || (goalForFilter?.ExposureTemplate?.FilterDefinitionId.HasValue == true && p.FilterDefinitionId == goalForFilter.ExposureTemplate.FilterDefinitionId)
+                || (goalForFilter != null && p.StandardFilter.HasValue && p.StandardFilter == GetStandardFilter(goalForFilter)));
             var profile = filterMapping?.MoonAvoidanceProfile;
             
             if (profile == null)
@@ -3005,7 +3039,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         return (12 - absHourAngle) * (100.0 / 12.0);
     }
 
-    private ECameraFilter? DetermineNextFilter(
+    private string? DetermineNextFilter(
         TargetSchedulingState state,
         SchedulerConfigurationDto configuration,
         Dictionary<Guid, double> sharedBatchCounts)
@@ -3041,9 +3075,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         };
     }
 
-    private ECameraFilter DetermineFilterLoop(
+    private string DetermineFilterLoop(
         TargetSchedulingState state,
-        List<ECameraFilter> availableFilters,
+        List<string> availableFilters,
         SchedulerConfigurationDto configuration)
     {
         // Cycle through filters in priority order
@@ -3053,9 +3087,9 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         return orderedFilters[currentIndex];
     }
 
-    private ECameraFilter DetermineFilterBatches(
+    private string DetermineFilterBatches(
         TargetSchedulingState state,
-        List<ECameraFilter> availableFilters,
+        List<string> availableFilters,
         SchedulerConfigurationDto configuration,
         Dictionary<Guid, double> panelBatchCounts)
     {
@@ -3072,15 +3106,15 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         
         _logger.LogInformation("Batch: '{Target}' P{Panel} BatchCount={BatchCount}, Size={Size}, Index={Index}, Filters=[{Filters}] → {Selected}",
             state.Target.Name, state.PanelNumber, batchCount, batchSize, filterIndex,
-            string.Join(",", orderedFilters.Select(f => $"{f}(p{state.Target.ImagingGoals?.FirstOrDefault(g => g.Filter == f)?.FilterPriority ?? 999})")),
+            string.Join(",", orderedFilters.Select(f => $"{f}(p{state.Target.ImagingGoals?.FirstOrDefault(g => string.Equals(GetFilterName(g), f, StringComparison.OrdinalIgnoreCase))?.FilterPriority ?? 999})")),
             selectedFilter);
         
         return selectedFilter;
     }
 
-    private ECameraFilter DetermineFilterSequential(
+    private string DetermineFilterSequential(
         TargetSchedulingState state,
-        List<ECameraFilter> availableFilters,
+        List<string> availableFilters,
         SchedulerConfigurationDto configuration)
     {
         // Complete one filter before moving to next
@@ -3095,8 +3129,8 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         return orderedFilters.First();
     }
 
-    private List<ECameraFilter> OrderFiltersByPriority(
-        List<ECameraFilter> filters,
+    private List<string> OrderFiltersByPriority(
+        List<string> filters,
         TargetSchedulingState state,
         SchedulerConfigurationDto configuration)
     {
@@ -3110,7 +3144,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             {
                 return filters.OrderBy(f =>
                 {
-                    var goal = panelGoals.FirstOrDefault(g => g.Filter == f && g.IsEnabled);
+                    var goal = panelGoals.FirstOrDefault(g => string.Equals(GetFilterName(g), f, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
                     if (goal == null) return 999;
                     
                     // Apply GoalOrderingMethod adjustment
@@ -3137,7 +3171,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         {
             return filters.OrderBy(f =>
             {
-                var goal = state.Target.ImagingGoals.FirstOrDefault(g => g.Filter == f && g.IsEnabled);
+                var goal = state.Target.ImagingGoals.FirstOrDefault(g => string.Equals(GetFilterName(g), f, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
                 // Lower FilterPriority number = higher priority (sorted first)
                 return goal?.FilterPriority ?? 999;
             }).ToList();
@@ -3149,18 +3183,18 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             var priorityOrder = configuration.FilterPriority;
             return filters.OrderBy(f =>
             {
-                var index = priorityOrder.IndexOf(f);
+                var index = priorityOrder.FindIndex(p => string.Equals(p.ToString(), f, StringComparison.OrdinalIgnoreCase));
                 return index >= 0 ? index : int.MaxValue;
             }).ToList();
         }
 
-        return filters.OrderBy(f => f.ToString()).ToList();
+        return filters.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private void UpdateFilterPatternState(
         TargetSchedulingState state,
         SchedulerConfigurationDto configuration,
-        ECameraFilter usedFilter,
+        string usedFilter,
         double exposureCount,
         Dictionary<Guid, double> panelBatchCounts)
     {
@@ -3196,14 +3230,14 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
     /// Calculate batch segments for a time period, splitting at batch boundaries.
     /// Returns list of (filter, startTime, endTime, exposureCount) for each segment.
     /// </summary>
-    private List<(ECameraFilter Filter, DateTime Start, DateTime End, int Exposures)> CalculateBatchSegments(
+    private List<(string Filter, DateTime Start, DateTime End, int Exposures)> CalculateBatchSegments(
         TargetSchedulingState state,
         DateTime slotStart,
         DateTime slotEnd,
         SchedulerConfigurationDto configuration,
         Dictionary<Guid, double> panelBatchCounts)
     {
-        var segments = new List<(ECameraFilter Filter, DateTime Start, DateTime End, int Exposures)>();
+        var segments = new List<(string Filter, DateTime Start, DateTime End, int Exposures)>();
         
         var availableFilters = state.FilterProgress
             .Where(fp => fp.Value.RemainingMinutes > 0)
@@ -3236,7 +3270,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         
         // Log the actual filter order for debugging
         var filterOrderWithPriority = orderedFilters.Select(f => {
-            var goal = state.Target.ImagingGoals?.FirstOrDefault(g => g.Filter == f && g.IsEnabled);
+            var goal = state.Target.ImagingGoals?.FirstOrDefault(g => string.Equals(GetFilterName(g), f, StringComparison.OrdinalIgnoreCase) && g.IsEnabled);
             return $"{f}(pri={goal?.FilterPriority ?? 999})";
         });
         _logger.LogInformation("BatchSegments: '{Target}' P{Panel} orderedFilters=[{Filters}], batchSize={BatchSize}",
@@ -3245,7 +3279,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         // Get exposure time for calculating exposures per minute
         // Use the first filter's exposure time as reference (they should be similar for batch logic)
         int exposureTimeSec = 300; // Default 5 min
-        var firstGoal = state.Target.ImagingGoals?.FirstOrDefault(g => availableFilters.Contains(g.Filter) && g.IsEnabled);
+        var firstGoal = state.Target.ImagingGoals?.FirstOrDefault(g => availableFilters.Contains(GetFilterName(g), StringComparer.OrdinalIgnoreCase) && g.IsEnabled);
         if (firstGoal != null)
         {
             exposureTimeSec = firstGoal.ExposureTimeSeconds > 0 ? firstGoal.ExposureTimeSeconds : 300;
@@ -3979,7 +4013,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 // Get available (non-blocked) imaging goals, ordered by FilterPriority
                 var goals = goalsSource?
                     .Where(g => g.IsEnabled && g.CompletedExposures < g.GoalExposureCount * repeatCount)
-                    .Where(g => state.BlockedFilters == null || !state.BlockedFilters.Contains(g.Filter))
+                    .Where(g => state.BlockedFilters == null || !state.BlockedFilters.Contains(g.FilterName))
                     .OrderBy(g => g.FilterPriority) // Lower number = higher priority
                     .ToList() ?? new List<ImagingGoalDto>();
                 
@@ -3988,7 +4022,7 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     _logger.LogDebug("GetNextSlotAsync: Target {Name}{Panel} has no available goals (blocked: {Blocked})",
                         target.Name, 
                         panel != null ? $" Panel {panel.PanelNumber}" : "",
-                        string.Join(",", state.BlockedFilters ?? new List<ECameraFilter>()));
+                        string.Join(",", state.BlockedFilters ?? new List<string>()));
                     continue;
                 }
                 
@@ -4000,8 +4034,8 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                 _logger.LogDebug("GetNextSlotAsync: Target {Name}{Panel} available goals: [{Goals}] → selected {Selected} (priority {Pri}, pattern={Pattern})",
                     target.Name,
                     panel != null ? $" Panel {panel.PanelNumber}" : "",
-                    string.Join(", ", goals.Select(g => $"{g.Filter}(p{g.FilterPriority})")),
-                    goal.Filter, goal.FilterPriority, filterPattern);
+                    string.Join(", ", goals.Select(g => $"{g.FilterName}(p{g.FilterPriority})")),
+                    goal.FilterName, goal.FilterPriority, filterPattern);
                 var total = goal.GoalExposureCount * repeatCount;
                 var template = goal.ExposureTemplate;
 
@@ -4054,13 +4088,13 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     DeclinationDegrees = slotDec,
                     PositionAngle = target.PA,
                     ImagingGoalId = goal.Id,
-                    Filter = goal.Filter.ToString(),
+                    Filter = goal.FilterName,
                     ExposureTimeSeconds = goal.ExposureTimeSeconds,
                     Gain = template?.Gain ?? -1,
                     Offset = template?.Offset ?? -1,
                     Binning = $"{template?.Binning ?? 1}x{template?.Binning ?? 1}",
                     RequiresSlew = requiresSlew,
-                    RequiresFilterChange = currentFilter != goal.Filter.ToString(),
+                    RequiresFilterChange = !string.Equals(currentFilter, goal.FilterName, StringComparison.OrdinalIgnoreCase),
                     CompletedExposures = goal.CompletedExposures,
                     TotalGoalExposures = total,
                     DitherEveryX = ditherEvery > 0 ? ditherEvery : 0,
@@ -4072,12 +4106,12 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
                     ScoreBreakdown = CloneScoreBreakdown(scored.ScoreResult.Breakdown),
                     SelectionReason = BuildSelectionReason(scored.ScoreResult, state, configuration, period),
                     Message = panel != null 
-                        ? $"{target.Name} P{panel.PanelNumber} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
-                        : $"{target.Name} - {goal.Filter} ({goal.CompletedExposures + 1}/{total})"
+                        ? $"{target.Name} P{panel.PanelNumber} - {goal.FilterName} ({goal.CompletedExposures + 1}/{total})"
+                        : $"{target.Name} - {goal.FilterName} ({goal.CompletedExposures + 1}/{total})"
                 };
                 
                 _logger.LogInformation("GetNextSlotAsync: Selected {Target}{Panel} {Filter} (Alt={Alt:F1}°, MoonDist={Moon:F1}°, Score={Score:F1})",
-                    target.Name, panel != null ? $" P{panel.PanelNumber}" : "", goal.Filter, period.Altitude, period.MoonDistance, scored.Score);
+                    target.Name, panel != null ? $" P{panel.PanelNumber}" : "", goal.FilterName, period.Altitude, period.MoonDistance, scored.Score);
                 
                 return result;
             }
@@ -4134,8 +4168,8 @@ internal class TargetSchedulingState
     public double ObservableMinutesTonight { get; set; } // Total observable time for TimeFirst strategy
     public int CurrentFilterIndex { get; set; }
     public int CurrentBatchCount { get; set; }
-    public Dictionary<ECameraFilter, FilterProgress> FilterProgress { get; set; } = new();
-    public List<ECameraFilter>? BlockedFilters { get; set; } // Filters currently blocked by moon avoidance
+    public Dictionary<string, FilterProgress> FilterProgress { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<string>? BlockedFilters { get; set; } // Filters currently blocked by moon avoidance
     public ObservablePeriod? CurrentPeriod { get; set; } // Current observable period for scoring
 }
 
@@ -4186,17 +4220,10 @@ internal static class FilterPatternSelector
         if (goals.Count == 1)
             return goals.First();
         
-        // Parse current filter if provided
-        ECameraFilter? currentFilterEnum = null;
-        if (!string.IsNullOrEmpty(currentFilter) && Enum.TryParse<ECameraFilter>(currentFilter, true, out var parsed))
-        {
-            currentFilterEnum = parsed;
-        }
-        
         return filterPattern switch
         {
-            "Batch" => SelectBatchGoal(goals, batchSize, currentFilterEnum),
-            "Loop" => SelectLoopGoal(goals, currentFilterEnum),
+            "Batch" => SelectBatchGoal(goals, batchSize, currentFilter),
+            "Loop" => SelectLoopGoal(goals, currentFilter),
             "Complete" or "Sequential" => goals.First(), // Complete mode: stick with highest priority
             _ => goals.First()
         };
@@ -4205,14 +4232,14 @@ internal static class FilterPatternSelector
     /// <summary>
     /// Batch mode: Continue with current filter until batch is complete, then move to next
     /// </summary>
-    private static ImagingGoalDto SelectBatchGoal(List<ImagingGoalDto> goals, int batchSize, ECameraFilter? currentFilter)
+    private static ImagingGoalDto SelectBatchGoal(List<ImagingGoalDto> goals, int batchSize, string? currentFilter)
     {
         if (batchSize <= 0) batchSize = 10;
         
         // If we have a current filter, check if we should continue with it
-        if (currentFilter.HasValue)
+        if (!string.IsNullOrWhiteSpace(currentFilter))
         {
-            var currentGoal = goals.FirstOrDefault(g => g.Filter == currentFilter.Value);
+            var currentGoal = goals.FirstOrDefault(g => string.Equals(g.FilterName, currentFilter, StringComparison.OrdinalIgnoreCase));
             if (currentGoal != null)
             {
                 // Calculate total exposures across ALL goals to determine batch position
@@ -4247,12 +4274,12 @@ internal static class FilterPatternSelector
     /// <summary>
     /// Loop mode: Cycle through filters round-robin style
     /// </summary>
-    private static ImagingGoalDto SelectLoopGoal(List<ImagingGoalDto> goals, ECameraFilter? currentFilter)
+    private static ImagingGoalDto SelectLoopGoal(List<ImagingGoalDto> goals, string? currentFilter)
     {
         // Find the current filter's index and select the next one
-        if (currentFilter.HasValue)
+        if (!string.IsNullOrWhiteSpace(currentFilter))
         {
-            var currentIndex = goals.FindIndex(g => g.Filter == currentFilter.Value);
+            var currentIndex = goals.FindIndex(g => string.Equals(g.FilterName, currentFilter, StringComparison.OrdinalIgnoreCase));
             if (currentIndex >= 0)
             {
                 // Move to next filter (round-robin)

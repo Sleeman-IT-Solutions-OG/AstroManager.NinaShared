@@ -34,6 +34,16 @@ public class ImagingGoalDto
     /// Filter (read-only, from ExposureTemplate)
     /// </summary>
     public ECameraFilter Filter => ExposureTemplate?.Filter ?? ECameraFilter.L;
+
+    /// <summary>
+    /// Canonical filter name for runtime, UI, and custom-filter-aware scheduling.
+    /// </summary>
+    public string FilterName => ExposureTemplate?.EffectiveFilterName ?? Filter.ToString();
+
+    /// <summary>
+    /// Optional standard-filter mapping for the template filter.
+    /// </summary>
+    public ECameraFilter? StandardFilter => ExposureTemplate?.StandardFilter ?? ExposureTemplate?.Filter;
     
     /// <summary>
     /// Filter priority (read-only, from ExposureTemplate.DefaultFilterPriority)

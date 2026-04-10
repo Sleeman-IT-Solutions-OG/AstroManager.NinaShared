@@ -25,6 +25,8 @@ public class PanelImagingGoalDto
     
     // Read-only properties from ExposureTemplate (for convenience/display)
     public ECameraFilter Filter => ExposureTemplate?.Filter ?? ECameraFilter.L;
+    public string FilterName => ExposureTemplate?.EffectiveFilterName ?? Filter.ToString();
+    public ECameraFilter? StandardFilter => ExposureTemplate?.StandardFilter ?? ExposureTemplate?.Filter;
     public int FilterPriority => ExposureTemplate?.DefaultFilterPriority ?? 50;
     public int ExposureTimeSeconds => ExposureTemplate?.ExposureTimeSeconds ?? 300;
     
