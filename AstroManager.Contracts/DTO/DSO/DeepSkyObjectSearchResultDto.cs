@@ -20,5 +20,11 @@ namespace Shared.Model.DTO.DSO
         /// Next opposition date for the DSO. Calculated during search to avoid individual API calls.
         /// </summary>
         public DateTime? NextOppositionDate { get; set; }
+
+        /// <summary>
+        /// Next date within the active seasonal observability window on which the DSO is observable.
+        /// Only populated for seasonal observability searches.
+        /// </summary>
+        public DateTime? NextObservableDate { get; set; }
     }
 }
