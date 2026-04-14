@@ -110,6 +110,16 @@ namespace Shared.Model.DTO.DSO
         public int? MinSeasonalObservabilityHours { get; set; }
 
         /// <summary>
+        /// Gets or sets the seasonal observability range start date.
+        /// </summary>
+        public DateTime? SeasonalObservabilityStartDate { get; set; }
+
+        /// <summary>
+        /// Gets or sets the seasonal observability range end date.
+        /// </summary>
+        public DateTime? SeasonalObservabilityEndDate { get; set; }
+
+        /// <summary>
         /// Gets or sets whether to use faster but less precise observability calculations.
         /// When enabled, coordinates are rounded to 0.4 degrees for caching which improves performance but reduces precision.
         /// Defaults to true on mobile devices, false on desktop.
@@ -288,6 +298,8 @@ namespace Shared.Model.DTO.DSO
             SeasonalObservabilityPeriod = null;
             SeasonalObservabilityDays = null;
             MinSeasonalObservabilityHours = null;
+            SeasonalObservabilityStartDate = null;
+            SeasonalObservabilityEndDate = null;
             UseFastObservabilitySearch = false;
             OrderByPopularity = false;
             ObservationWindow = new ObservationWindowDto();
@@ -330,7 +342,7 @@ namespace Shared.Model.DTO.DSO
             if (MaxDistanceFromMoon.HasValue) count++;
             if (RequiredObservabilityFilters?.Any() == true) count++;
             if (MinObservabilityDurationMinutes.HasValue) count++;
-            if (GetSeasonalObservabilityDays().HasValue || MinSeasonalObservabilityHours.HasValue) count++;
+            if (HasSeasonalObservabilityFilter()) count++;
             if (ObservationWindow != null && 
                 (ObservationWindow.StartTime.HasValue || 
                  ObservationWindow.EndTime.HasValue || 
@@ -371,6 +383,8 @@ namespace Shared.Model.DTO.DSO
                 SeasonalObservabilityPeriod = this.SeasonalObservabilityPeriod,
                 SeasonalObservabilityDays = this.SeasonalObservabilityDays,
                 MinSeasonalObservabilityHours = this.MinSeasonalObservabilityHours,
+                SeasonalObservabilityStartDate = this.SeasonalObservabilityStartDate,
+                SeasonalObservabilityEndDate = this.SeasonalObservabilityEndDate,
                 UseFastObservabilitySearch = this.UseFastObservabilitySearch,
                 PopularityFilter = this.PopularityFilter,
                 OrderByPopularity = this.OrderByPopularity,
@@ -409,12 +423,56 @@ namespace Shared.Model.DTO.DSO
 
         public bool HasSeasonalObservabilityFilter()
         {
-            return GetSeasonalObservabilityDays().HasValue &&
+            return TryGetSeasonalObservabilityRange().HasValue &&
                    MinSeasonalObservabilityHours.HasValue &&
                    MinSeasonalObservabilityHours.Value > 0;
         }
 
         public int? GetSeasonalObservabilityDays()
+        {
+            var range = TryGetSeasonalObservabilityRange();
+            if (range.HasValue)
+            {
+                return Math.Clamp((range.Value.EndDate - range.Value.StartDate).Days + 1, 1, 365);
+            }
+
+            if (SeasonalObservabilityDays is >= 1 and <= 365)
+            {
+                return SeasonalObservabilityDays;
+            }
+
+            return SeasonalObservabilityPeriod switch
+            {
+                DTO.DSO.SeasonalObservabilityPeriod.Next365Days => 365,
+                DTO.DSO.SeasonalObservabilityPeriod.Next30Days => 30,
+                _ => null
+            };
+        }
+
+        public (DateTime StartDate, DateTime EndDate)? TryGetSeasonalObservabilityRange()
+        {
+            if (SeasonalObservabilityStartDate.HasValue && SeasonalObservabilityEndDate.HasValue)
+            {
+                var startDate = SeasonalObservabilityStartDate.Value.Date;
+                var endDate = SeasonalObservabilityEndDate.Value.Date;
+                if (endDate >= startDate)
+                {
+                    var maxEndDate = startDate.AddDays(364);
+                    return (startDate, endDate <= maxEndDate ? endDate : maxEndDate);
+                }
+            }
+
+            var legacyDays = GetLegacySeasonalObservabilityDays();
+            if (!legacyDays.HasValue)
+            {
+                return null;
+            }
+
+            var start = DateTime.Today;
+            return (start, start.AddDays(legacyDays.Value - 1));
+        }
+
+        private int? GetLegacySeasonalObservabilityDays()
         {
             if (SeasonalObservabilityDays is >= 1 and <= 365)
             {
@@ -460,6 +518,8 @@ namespace Shared.Model.DTO.DSO
             // Observability filters
             hashCode.Add(string.Join(",", RequiredObservabilityFilters == null ? "" : RequiredObservabilityFilters.OrderBy(x => x)));
             hashCode.Add(MinObservabilityDurationMinutes);
+            hashCode.Add(SeasonalObservabilityStartDate?.Date);
+            hashCode.Add(SeasonalObservabilityEndDate?.Date);
             hashCode.Add(GetSeasonalObservabilityDays());
             hashCode.Add(MinSeasonalObservabilityHours);
             hashCode.Add(UseFastObservabilitySearch);

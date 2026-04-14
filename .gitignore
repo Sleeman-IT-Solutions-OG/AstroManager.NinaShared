@@ -9,3 +9,6 @@ publish/
 *.nupkg
 *.snupkg
 NuGet.local.config
+/AstroManager.Contracts/artifacts/verify
+/AstroManager.PluginShared/artifacts/verify/webapi-obj
+/AstroManager.PluginShared/artifacts/verify/ui-obj
