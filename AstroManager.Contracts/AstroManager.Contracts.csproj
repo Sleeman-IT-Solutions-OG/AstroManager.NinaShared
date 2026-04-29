@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <NuGetAudit>false</NuGetAudit>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**</DefaultItemExcludes>
     <PackageId>AstroManager.Contracts</PackageId>
     <Version>1.0.2.1</Version>
     <Authors>AstroManager</Authors>

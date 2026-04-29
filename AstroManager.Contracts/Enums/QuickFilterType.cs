@@ -13,6 +13,11 @@ namespace Shared.Model.Enums
         /// <summary>
         /// Filters for Target searches
         /// </summary>
-        Target = 1
+        Target = 1,
+
+        /// <summary>
+        /// Filters for Community Target searches
+        /// </summary>
+        CommunityTarget = 2
     }
 }

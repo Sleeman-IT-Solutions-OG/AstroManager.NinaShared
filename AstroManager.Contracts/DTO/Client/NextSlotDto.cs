@@ -131,6 +131,12 @@ public class NextSlotDto
     /// False for manual filter workflows where AstroManager or NINA only tracks the active filter.
     /// </summary>
     public bool ShouldAutomateFilterChanges { get; set; } = true;
+
+    /// <summary>
+    /// Whether capture attribution should prefer the AstroManager/runtime slot filter over
+    /// the image metadata filter reported by N.I.N.A. This is used for direct manual-filter input in AstroManager.
+    /// </summary>
+    public bool PreferSchedulerFilterForCaptureAttribution { get; set; }
     
     /// <summary>
     /// Minutes to wait (when SlotType is Wait)
