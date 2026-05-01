@@ -18,9 +18,12 @@ namespace Shared.Model.DTO.Settings
     {
         public Guid Id { get; set; }
         public Guid UserId { get; set; }
-        public string NameOfEquipment { get; set; }
+        public string NameOfEquipment { get; set; } = string.Empty;
         public CameraDto Camera { get; set; } = new CameraDto();
         public TelescopeDto Telescope { get; set; } = new TelescopeDto();
+        public Guid? CatalogCameraId { get; set; }
+        public string? CatalogCameraName { get; set; }
+        public bool CatalogCameraSelectionTouched { get; set; }
         public bool HasRotator { get; set; }
         public List<ECameraFilter> Filters { get; set; } = new();
         public List<EquipmentFilterAssignmentDto> AssignedFilters { get; set; } = new();
@@ -157,7 +160,7 @@ namespace Shared.Model.DTO.Settings
 
         [JsonIgnore]
         public string DisplayStringCompact => Telescope != null && Camera != null 
-            ? $"{NameOfEquipment} ({Telescope.NameTelescope} | {Camera.Name})"
+            ? $"{NameOfEquipment} ({Telescope.NameTelescope} | {GetDisplayCameraName()})"
             : NameOfEquipment ?? "Unknown Equipment";
         
         [JsonIgnore]
@@ -224,6 +227,13 @@ namespace Shared.Model.DTO.Settings
         public string GetSizeDataTextCompact()
         {
             return $"{FOV} • {PixelScaleString}";
+        }
+
+        public string GetDisplayCameraName()
+        {
+            return !string.IsNullOrWhiteSpace(CatalogCameraName)
+                ? CatalogCameraName
+                : Camera?.Name ?? "Unknown Camera";
         }
 
     }

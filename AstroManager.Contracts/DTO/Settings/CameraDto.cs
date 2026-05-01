@@ -9,13 +9,17 @@ namespace Shared.Model.DTO.Settings
     public class CameraDto
     {
         public Guid Id { get; set; }
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? Manufacturer { get; set; }
         public double PixelSize { get; set; } // in um
         public int PixelX { get; set; }
         public int PixelY { get; set; }
         public bool IsMono { get; set; }
+        public bool? IsCooled { get; set; }
+        public double? QuantumEfficiencyPercent { get; set; }
         public double SkyPA { get; set; } = 0; // Sky Position Angle in degrees
         public bool ManualFilterChanges { get; set; }
         public EManualFilterChangeSource ManualFilterChangeSource { get; set; } = EManualFilterChangeSource.ManualFilterWheelInNina;
+        public bool CameraMetadataTouched { get; set; }
     }
 }
