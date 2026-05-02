@@ -65,6 +65,18 @@ namespace Shared.Model.DTO.Settings
         public double MinAltitude { get; set; } = 20.0;
 
         /// <summary>
+        /// Gets or sets the optional Bortle class for the observatory.
+        /// When an exact sky quality value is set, this value is treated as a fallback/override source only.
+        /// </summary>
+        public int? BortleClass { get; set; }
+
+        /// <summary>
+        /// Gets or sets the optional exact sky quality in magnitudes per square arcsecond.
+        /// When provided, AstroManager derives the displayed Bortle class from this value.
+        /// </summary>
+        public double? SkyQualityMpsas { get; set; }
+
+        /// <summary>
         /// Gets or sets the custom horizon points for the observatory.
         /// Each point defines the horizon altitude at a specific azimuth.
         /// </summary>
@@ -117,6 +129,39 @@ namespace Shared.Model.DTO.Settings
         public bool HasCustomHorizon()
         {
             return CustomHorizonPoints?.Count > 0;
+        }
+
+        /// <summary>
+        /// Gets the effective Bortle class, preferring the value derived from exact sky quality when present.
+        /// </summary>
+        public int? GetEffectiveBortleClass()
+        {
+            return ObservatorySkyQualityHelper.GetEffectiveBortleClass(BortleClass, SkyQualityMpsas);
+        }
+
+        /// <summary>
+        /// Gets a short display summary for the observatory sky quality settings.
+        /// </summary>
+        public string GetSkyQualityDisplayText()
+        {
+            var effectiveBortleClass = GetEffectiveBortleClass();
+
+            if (effectiveBortleClass.HasValue && SkyQualityMpsas.HasValue)
+            {
+                return $"Bortle {effectiveBortleClass.Value} ({SkyQualityMpsas.Value:F2} mag/arcsec2)";
+            }
+
+            if (effectiveBortleClass.HasValue)
+            {
+                return $"Bortle {effectiveBortleClass.Value}";
+            }
+
+            if (SkyQualityMpsas.HasValue)
+            {
+                return $"{SkyQualityMpsas.Value:F2} mag/arcsec2";
+            }
+
+            return "Not set";
         }
 
 
