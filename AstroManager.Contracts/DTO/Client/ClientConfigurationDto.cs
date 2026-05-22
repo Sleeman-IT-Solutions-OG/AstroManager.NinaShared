@@ -35,6 +35,9 @@ public class ClientConfigurationDto
     public int DitheringInterval { get; set; }
     public int HeartbeatIntervalSeconds { get; set; } = 300;
     public bool AutoStartSessions { get; set; }
+    public bool EnableCloudCaptureUploads { get; set; } = true;
+    public bool DeferCloudOriginalUploadsUntilAfterAstronomicalDawn { get; set; } = false;
+    public int DeferredCloudUploadOffsetMinutes { get; set; } = 90;
     public bool ParkOnComplete { get; set; }
     public bool WarmCameraOnComplete { get; set; }
     public string CallbackExecutablePath { get; set; } = string.Empty;
@@ -77,6 +80,9 @@ public class SaveClientConfigurationDto
     public int DitheringInterval { get; set; } = 1;
     public int HeartbeatIntervalSeconds { get; set; } = 300;
     public bool AutoStartSessions { get; set; } = true;
+    public bool EnableCloudCaptureUploads { get; set; } = true;
+    public bool DeferCloudOriginalUploadsUntilAfterAstronomicalDawn { get; set; } = false;
+    public int DeferredCloudUploadOffsetMinutes { get; set; } = 90;
     public bool ParkOnComplete { get; set; } = true;
     public bool WarmCameraOnComplete { get; set; } = true;
     public string CallbackExecutablePath { get; set; } = @"C:\Program Files\AstroManager\callback.exe";

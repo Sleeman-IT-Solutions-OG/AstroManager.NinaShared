@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "IjuP7UpHA8M=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Michael\\source\\repos\\AstroManager.Plugin.Shared\\AstroManager.NinaShared\\AstroManager.Contracts\\AstroManager.Contracts.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Michael\\.nuget\\packages\\timezoneconverter\\7.0.0\\timezoneconverter.7.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

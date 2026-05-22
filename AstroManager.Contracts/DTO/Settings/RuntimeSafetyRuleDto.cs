@@ -13,6 +13,31 @@ public enum RuntimeSafetyConditionOperator
     NotEquals = 5
 }
 
+public enum RuntimeSafetyUnknownDataBehavior
+{
+    Ignore = 0,
+    TriggerRule = 1
+}
+
+public enum RuntimeSafetyActivationType
+{
+    Always = 0,
+    AfterLocalTime = 1,
+    AfterTwilight = 2
+}
+
+public enum RuntimeSafetyTwilightReference
+{
+    Sunset = 0,
+    CivilDusk = 1,
+    NauticalDusk = 2,
+    AstronomicalDusk = 3,
+    AstronomicalDawn = 4,
+    NauticalDawn = 5,
+    CivilDawn = 6,
+    Sunrise = 7
+}
+
 public class RuntimeSafetyMetricConditionDto
 {
     [Required]
@@ -50,6 +75,57 @@ public class RuntimeSafetyRuleDto
     /// Rule matches when ANY condition is true (OR).
     /// </summary>
     public List<RuntimeSafetyMetricConditionDto> Conditions { get; set; } = new();
+
+    /// <summary>
+    /// When this rule becomes eligible to evaluate.
+    /// </summary>
+    public RuntimeSafetyActivationType ActivationType { get; set; } = RuntimeSafetyActivationType.Always;
+
+    /// <summary>
+    /// Optional local time in HH:mm format when <see cref="ActivationType"/> is <see cref="RuntimeSafetyActivationType.AfterLocalTime"/>.
+    /// </summary>
+    [StringLength(5)]
+    public string? LocalTime { get; set; }
+
+    /// <summary>
+    /// Twilight reference when <see cref="ActivationType"/> is <see cref="RuntimeSafetyActivationType.AfterTwilight"/>.
+    /// </summary>
+    public RuntimeSafetyTwilightReference TwilightReference { get; set; } = RuntimeSafetyTwilightReference.AstronomicalDawn;
+
+    /// <summary>
+    /// Optional signed offset in minutes applied to the selected time anchor.
+    /// </summary>
+    [Range(-720, 720)]
+    public int TimeOffsetMinutes { get; set; }
+
+    /// <summary>
+    /// How missing or unknown metric data is treated while evaluating the rule.
+    /// </summary>
+    public RuntimeSafetyUnknownDataBehavior UnknownDataBehavior { get; set; } = RuntimeSafetyUnknownDataBehavior.Ignore;
+
+    /// <summary>
+    /// Condition must remain violated for at least this many minutes before actions execute.
+    /// </summary>
+    [Range(0, 1440)]
+    public int TriggerDelayMinutes { get; set; }
+
+    /// <summary>
+    /// After a rule has fired, the condition must remain clear for at least this many minutes before recovery is considered complete.
+    /// </summary>
+    [Range(0, 1440)]
+    public int RecoveryDelayMinutes { get; set; }
+
+    /// <summary>
+    /// Minimum minutes between repeated executions of the same rule.
+    /// </summary>
+    [Range(0, 1440)]
+    public int CooldownMinutes { get; set; }
+
+    /// <summary>
+    /// Optional cap on how many times this rule may execute within one observing night.
+    /// </summary>
+    [Range(1, 100)]
+    public int? MaxExecutionsPerNight { get; set; }
 
     /// <summary>
     /// Legacy single-condition metric key. Kept for backward compatibility.

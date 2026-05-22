@@ -101,6 +101,11 @@ public class ScheduledTargetDto
     /// </summary>
     [Range(1, 100, ErrorMessage = "Repeat count must be between 1 and 100")]
     public int RepeatCount { get; set; } = 1;
+
+    /// <summary>
+    /// Controls whether full-quality cloud capture uploads are enabled for this target.
+    /// </summary>
+    public bool EnableCloudCaptureUploads { get; set; } = true;
     
     public string? Notes { get; set; }
     

@@ -56,6 +56,11 @@ public class CreateScheduledTargetDto
     /// </summary>
     [Range(1, 100)]
     public int RepeatCount { get; set; } = 1;
+
+    /// <summary>
+    /// Whether full-quality cloud capture uploads should be enabled for this target.
+    /// </summary>
+    public bool EnableCloudCaptureUploads { get; set; } = true;
     
     /// <summary>
     /// REQUIRED: Observatory for this scheduled target

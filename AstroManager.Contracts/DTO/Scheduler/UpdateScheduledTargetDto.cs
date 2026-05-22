@@ -24,6 +24,8 @@ public class UpdateScheduledTargetDto
     
     [Range(1, 100, ErrorMessage = "Repeat count must be between 1 and 100")]
     public int? RepeatCount { get; set; }
+
+    public bool? EnableCloudCaptureUploads { get; set; }
     
     [JsonConverter(typeof(JsonStringEnumConverter<ScheduledTargetStatus>))]
     public ScheduledTargetStatus? Status { get; set; }

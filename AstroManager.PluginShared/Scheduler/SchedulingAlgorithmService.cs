@@ -3275,28 +3275,40 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         });
         _logger.LogInformation("BatchSegments: '{Target}' P{Panel} orderedFilters=[{Filters}], batchSize={BatchSize}",
             state.Target.Name, state.PanelNumber, string.Join(", ", filterOrderWithPriority), batchSize);
-        
-        // Get exposure time for calculating exposures per minute
-        // Use the first filter's exposure time as reference (they should be similar for batch logic)
-        int exposureTimeSec = 300; // Default 5 min
-        var firstGoal = state.Target.ImagingGoals?.FirstOrDefault(g => availableFilters.Contains(GetFilterName(g), StringComparer.OrdinalIgnoreCase) && g.IsEnabled);
-        if (firstGoal != null)
-        {
-            exposureTimeSec = firstGoal.ExposureTimeSeconds > 0 ? firstGoal.ExposureTimeSeconds : 300;
-        }
-        
+
         var currentTime = slotStart;
         var efficiency = configuration.ImagingEfficiencyPercent / 100.0;
         
         // Use FRACTIONAL batch count for precise tracking (per panel)
         // This ensures we hit exactly the batch size, not 9 or 11
         double fractionalBatchCount = panelBatchCounts.GetValueOrDefault(panelKey, 0);
+        var remainingMinutesByFilter = state.FilterProgress
+            .Where(fp => fp.Value.RemainingMinutes > 0)
+            .ToDictionary(
+                fp => fp.Key,
+                fp => fp.Value.RemainingMinutes,
+                StringComparer.OrdinalIgnoreCase);
         
         while (currentTime < slotEnd)
         {
+            var currentlyAvailableFilters = remainingMinutesByFilter
+                .Where(fp => fp.Value > 0)
+                .Select(fp => fp.Key)
+                .ToList();
+
+            if (!currentlyAvailableFilters.Any())
+            {
+                _logger.LogInformation("BatchSegments: '{Target}' P{Panel} - No filters with remaining time during slot",
+                    state.Target.Name, state.PanelNumber);
+                break;
+            }
+
+            orderedFilters = OrderFiltersByPriority(currentlyAvailableFilters, state, configuration);
+
             // Determine current filter based on batch count (use integer part)
             var filterIndex = ((int)fractionalBatchCount / batchSize) % orderedFilters.Count;
             var currentFilter = orderedFilters[filterIndex];
+            var currentExposureTimeSec = GetExposureTimeSecondsForFilter(state, currentFilter);
             
             // Calculate FRACTIONAL exposures until next batch boundary
             var exposuresInCurrentBatch = fractionalBatchCount % batchSize;
@@ -3305,41 +3317,52 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
             // Calculate FRACTIONAL exposures that fit in remaining slot time
             var remainingSlotMinutes = (slotEnd - currentTime).TotalMinutes;
             var actualImagingMinutes = remainingSlotMinutes * efficiency;
-            var exposuresInRemainingSlot = actualImagingMinutes * 60 / exposureTimeSec;
+            var exposuresInRemainingSlot = actualImagingMinutes * 60 / currentExposureTimeSec;
+            var remainingFilterMinutes = remainingMinutesByFilter.GetValueOrDefault(currentFilter, 0);
+            var remainingFilterExposures = remainingFilterMinutes * 60 / currentExposureTimeSec;
             
             // If less than 0.1 exposures fit (very small remaining time), we're done
             // Use low threshold to avoid gaps - even partial exposures fill the schedule
             if (exposuresInRemainingSlot < 0.1)
                 break;
+
+            if (remainingFilterExposures < 0.1)
+            {
+                remainingMinutesByFilter[currentFilter] = 0;
+                continue;
+            }
             
             // Determine segment: either fill until batch switch or until slot ends
-            double exposuresForSegment;
-            DateTime segmentEnd;
-            
-            if (exposuresUntilSwitch <= exposuresInRemainingSlot)
+            double exposuresForSegment = Math.Min(exposuresUntilSwitch, Math.Min(exposuresInRemainingSlot, remainingFilterExposures));
+            if (exposuresForSegment < 0.1)
             {
-                // We'll complete this batch within the slot - split at exact boundary
-                exposuresForSegment = exposuresUntilSwitch;
-                var segmentMinutes = exposuresForSegment * exposureTimeSec / 60.0 / efficiency;
+                break;
+            }
+
+            DateTime segmentEnd;
+
+            if (exposuresForSegment < exposuresInRemainingSlot)
+            {
+                var segmentMinutes = exposuresForSegment * currentExposureTimeSec / 60.0 / efficiency;
                 segmentEnd = currentTime.AddMinutes(segmentMinutes);
             }
             else
             {
-                // Slot ends before batch completes - use all remaining time
-                exposuresForSegment = exposuresInRemainingSlot;
                 segmentEnd = slotEnd;
             }
             
             // Round to integer for the session (but keep fractional for tracking)
             // Use ceiling to ensure at least 1 exposure for any meaningful segment
             int exposuresInt = Math.Max(1, (int)Math.Ceiling(exposuresForSegment));
+            var plannedImagingMinutes = (segmentEnd - currentTime).TotalMinutes * efficiency;
             
-            _logger.LogInformation("BatchSegment: '{Target}' {Start:HH:mm}-{End:HH:mm} {Filter} ({Exposures} exp, frac={Frac:F2}), BatchCount {Before:F1}→{After:F1}",
+            _logger.LogInformation("BatchSegment: '{Target}' {Start:HH:mm}-{End:HH:mm} {Filter} ({Exposures} exp, frac={Frac:F2}, expTime={ExpTime}s, remaining={Remaining:F1}min), BatchCount {Before:F1}→{After:F1}",
                 state.Target.Name, currentTime, segmentEnd, currentFilter, exposuresInt, exposuresForSegment,
-                fractionalBatchCount, fractionalBatchCount + exposuresForSegment);
+                currentExposureTimeSec, remainingFilterMinutes, fractionalBatchCount, fractionalBatchCount + exposuresForSegment);
             
             segments.Add((currentFilter, currentTime, segmentEnd, exposuresInt));
             
+            remainingMinutesByFilter[currentFilter] = Math.Max(0, remainingFilterMinutes - plannedImagingMinutes);
             currentTime = segmentEnd;
             fractionalBatchCount += exposuresForSegment; // Add FRACTIONAL amount for precise tracking
         }
@@ -3349,6 +3372,27 @@ public class SchedulingAlgorithmService : ISchedulingAlgorithmService
         panelBatchCounts[panelKey] = fractionalBatchCount;
         
         return segments;
+    }
+
+    private int GetExposureTimeSecondsForFilter(TargetSchedulingState state, string filterName)
+    {
+        if (state.IsMosaicPanel && state.PanelId.HasValue)
+        {
+            var panelGoal = state.Target.Panels?
+                .FirstOrDefault(p => p.Id == state.PanelId.Value)?
+                .ImagingGoals?
+                .FirstOrDefault(g => g.IsEnabled && string.Equals(g.FilterName, filterName, StringComparison.OrdinalIgnoreCase));
+
+            if (panelGoal != null)
+            {
+                return panelGoal.ExposureTimeSeconds > 0 ? panelGoal.ExposureTimeSeconds : 300;
+            }
+        }
+
+        var targetGoal = state.Target.ImagingGoals?
+            .FirstOrDefault(g => g.IsEnabled && string.Equals(GetFilterName(g), filterName, StringComparison.OrdinalIgnoreCase));
+
+        return targetGoal?.ExposureTimeSeconds > 0 ? targetGoal.ExposureTimeSeconds : 300;
     }
 
     private void UpdateTargetStates(

@@ -1,0 +1,6 @@
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.csproj.AssemblyReference.cache
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.AssemblyInfoInputs.cache
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.AssemblyInfo.cs
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.csproj.CoreCompileInputs.cache
+C:\Users\Michael\source\repos\AstroManager.Plugin.Shared\AstroManager.NinaShared\AstroManager.Contracts\.codex-build\maui-obj\Debug\net8.0\AstroManager.Contracts.sourcelink.json
