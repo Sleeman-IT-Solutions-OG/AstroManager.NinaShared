@@ -33,6 +33,8 @@ public static class CapturedImageDtoExtensions
             GradeScore = dto.GradeScore,
             GradeBand = dto.GradeBand,
             IsAccepted = dto.IsAccepted,
+            IsCloudAvailable = dto.IsCloudAvailable,
+            IsInImageLibrary = IsInImageLibrary(dto),
             TargetName = dto.TargetName,
             PanelNumber = dto.PanelNumber,
             PanelImagingGoalId = dto.PanelImagingGoalId,
@@ -58,6 +60,22 @@ public static class CapturedImageDtoExtensions
             WeatherCloudCover = dto.WeatherCloudCover,
             WeatherWindSpeed = dto.WeatherWindSpeed,
             WeatherSkyQuality = dto.WeatherSkyQuality
+        };
+    }
+
+    private static bool IsInImageLibrary(CapturedImageDto dto)
+    {
+        if (!dto.AstroImageId.HasValue)
+        {
+            return false;
+        }
+
+        return dto.SourceSystem switch
+        {
+            CapturedImageSourceSystemDto.ImageImport => true,
+            CapturedImageSourceSystemDto.CloudImport => true,
+            CapturedImageSourceSystemDto.ManualUpload => true,
+            _ => false
         };
     }
     

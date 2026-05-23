@@ -11,6 +11,11 @@ namespace Shared.Model.DTO.Scheduler;
 public class CapturedImageDto : IImageDisplayData
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// Origin system that created this captured-image record.
+    /// </summary>
+    public CapturedImageSourceSystemDto SourceSystem { get; set; } = CapturedImageSourceSystemDto.Unknown;
     
     /// <summary>
     /// Reference to the client license (for images captured via status updates)
@@ -57,6 +62,11 @@ public class CapturedImageDto : IImageDisplayData
     /// Indicates if this captured image record has a file assigned yet
     /// </summary>
     public bool HasFileAssigned => !string.IsNullOrEmpty(FileName) || AstroImageId.HasValue;
+
+    /// <summary>
+    /// True when the full-quality original for this capture is currently available in AstroManager cloud storage.
+    /// </summary>
+    public bool IsCloudAvailable { get; set; }
     
     /// <summary>
     /// Full file path where the image is stored

@@ -718,6 +718,8 @@ public class ImageHistoryItemDto : Common.IImageDisplayData
     public int? GradeScore { get; set; }
     public string? GradeBand { get; set; }
     public bool? IsAccepted { get; set; }
+    public bool IsCloudAvailable { get; set; }
+    public bool IsInImageLibrary { get; set; }
     public double? Min { get; set; }
     public double? Max { get; set; }
     public long? ADU { get; set; }
