@@ -715,6 +715,7 @@ public class ImageHistoryItemDto : Common.IImageDisplayData
     public double? Mean { get; set; }
     public double? Median { get; set; }
     public double? StdDev { get; set; }
+    public double? Eccentricity { get; set; }
     public int? GradeScore { get; set; }
     public string? GradeBand { get; set; }
     public bool? IsAccepted { get; set; }
@@ -809,6 +810,7 @@ public class UploadImageThumbnailDto
     public double? ExposureTime { get; set; }
     public double? HFR { get; set; }
     public int? DetectedStars { get; set; }
+    public double? Eccentricity { get; set; }
     public string? TargetName { get; set; }
     public int? PanelNumber { get; set; }
     public int? Gain { get; set; }

@@ -30,6 +30,7 @@ public static class CapturedImageDtoExtensions
             Mean = dto.BackgroundMean,
             Median = dto.MedianAdu,
             StdDev = dto.BackgroundNoise,
+            Eccentricity = dto.Eccentricity,
             GradeScore = dto.GradeScore,
             GradeBand = dto.GradeBand,
             IsAccepted = dto.IsAccepted,
