@@ -10,6 +10,7 @@ namespace Shared.Model.DTO.Settings
         public string BasePath { get; set; }
         public string ArchivePath { get; set; }
         public string NotImportedPath { get; set; }
+        public string? CalibrationFilesPath { get; set; }
         public List<SubPathElementDto> SubPathElements { get; set; } = new();
 
 
