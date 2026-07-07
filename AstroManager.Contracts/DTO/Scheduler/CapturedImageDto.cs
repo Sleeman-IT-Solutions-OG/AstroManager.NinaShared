@@ -444,6 +444,7 @@ public class FilterImageStats
 
 public class RegradeCapturedImagesRequestDto
 {
+    public Guid? CapturedImageId { get; set; }
     public Guid? TargetId { get; set; }
     public Guid? ClientLicenseId { get; set; }
     public bool OnlyActiveTargets { get; set; } = false;
